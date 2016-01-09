@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<applications>
+<application>
+<name>paint</name>
+<start>mspaint.exe</start>
+<stop>ping stopp0.de -4</stop>
+<restart>true</restart>
+</application>
+<application>
+<name>rechner</name>
+<start>calc.exe</start>
+<stop>ping stopp1.de -4</stop>
+<restart>false</restart>
+</application>
+<application>
+<name>ping auf googleDNS</name>
+<start>ping 8.8.8.8 -4</start>
+<stop>ping stopDNS.de</stop>
+<restart>false</restart>
+</application>
+</applications>
