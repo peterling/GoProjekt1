@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"crypto/sha1"
 	"net/http"
+	"encoding/hex"
 )
 
 type xmlConfig struct {
@@ -184,6 +185,11 @@ func runningProcsLengthCheck(){
 	runtime.Gosched()
 }
 func xmlReadIn(){			//XML-Datei wird eingelesen
+mutExProgrammListeReorged.Lock()
+programmListeReorged = time.Now()
+mutExProgrammListeReorged.Unlock()
+runtime.Gosched()
+hashOfProgrammListe()
 	xmlContent, _ := ioutil.ReadFile(configPath)
 	err := xml.Unmarshal(xmlContent, &v)
 	if err != nil {
@@ -215,37 +221,36 @@ func watchFile() error {
     return nil
 }
 var runningProcsReorged time.Time = time.Now()
+var programmListeReorged time.Time = time.Now()
 var mutExRunningProcsReorged = &sync.RWMutex{}
+var mutExProgrammListeReorged = &sync.RWMutex{}
 
-func hashOfRunningProcs(){		//runningProcsListe könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
+func hashOfProgrammListe(){		//Programmliste könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
 	h := sha1.New()				//falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
-	mutExRunningProcs.RLock()
+	mutExProgrammListeReorged.RLock()
+
+		h.Write([]byte(programmListeReorged.String()))
+
+	mutExProgrammListeReorged.RUnlock()
+	runtime.Gosched()
+	    bs := h.Sum(nil)
+fmt.Printf("%x\n", bs)
+}
+
+func hashOfRunningProcs()string{		//runningProcsListe könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
+	h := sha1.New()				//falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
 	mutExRunningProcsReorged.RLock()
 
 		h.Write([]byte(runningProcsReorged.String()))
-	
-	mutExRunningProcs.RUnlock()
+
 	mutExRunningProcsReorged.RUnlock()
 	runtime.Gosched()
 	    bs := h.Sum(nil)
+
 fmt.Printf("%x\n", bs)
+return hex.EncodeToString(bs)
 }
-//Better values for hashing, I think...
-/*
-func hashOfRunningProcs(){		//runningProcsListe könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
-	h := sha1.New()				//falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
-	mutExRunningProcs.RLock()
-	if len(runningProcs) > 0 {
-		h.Write([]byte((strconv.Itoa(len(runningProcs)))+runningProcs[len(runningProcs)-1].Name))
-	} else {
-		h.Write([]byte(strconv.Itoa(len(runningProcs))))
-	}
-	mutExRunningProcs.RUnlock()
-	runtime.Gosched()
-	    bs := h.Sum(nil)
-fmt.Printf("%x\n", bs)
-}
-*/
+
 func main() {
 	//Programminitialisierung
 	xmlReadIn()			//XML-Datei einlesen lassen
@@ -257,6 +262,9 @@ webServer()
 
 	 fmt.Scanln()		//Programm weiterlaufen lassen ohne Ende //endpoint
 }
+
+
+
 
 func ProcControl(w http.ResponseWriter, r *http.Request) {
     r.ParseForm()  // parse arguments, you have to call this by yourself
@@ -271,27 +279,41 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	
 	welchesProgramm := strings.Join(r.Form["program"],"")
 	wasTun:=strings.Join(r.Form["aktion"],"")
+	hash:=strings.Join(r.Form["hash"],"")		//hash für Versionsabgleich der Listen(Processe und Programme)
 	//	fmt.Fprintln(w, welchesProgramm)
 	//	fmt.Fprintln(w, wasTun)
-		
 	procNr,_:=strconv.Atoi(welchesProgramm)
-	if procNr >=0 && procNr <len(runningProcs){		//Wenn Prozess in Liste... dann
-		fmt.Fprintln(w,welchesProgramm)
-		fmt.Fprintln(w,"Prozess vorhanden")
-		fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde")
-			 if wasTun=="starten"{
-				programmStart(procNr)
-		        fmt.Fprintln(w, "gestartet")
-			    } else if wasTun=="beenden"{
-		        fmt.Fprintln(w, "beendet")
-		  	  } else {
-		       fmt.Fprintln(w, "nix wurde gemacht, falscher Aufruf!")}
-			
-				}else{		//Wenn Prozess nicht vorhanden, dann
-				fmt.Fprintln(w,"Programm nix da!")
-				}
+	
+//	if hash==string(hashOfRunningProcs()){
+	//if strings.Compare(hash, string(hashOfRunningProcs()))==0{
+	
+	 switch wasTun {		//same identifier procNr for ProgrammID and ProcID...
+     case "start":{ if procNr >=0 && procNr <len(v.ProgrammStartListe) && hash==hashOfRunningProcs() {
+					fmt.Fprintln(w,welchesProgramm)
+			//		fmt.Println(strconv.FormatBool(hash==hashOfRunningProcs()) )
+					fmt.Fprintln(w,"Programm in StartListe vorhanden")
+					programmStart(procNr)
+					fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde gestartet");
+					}}
+    case "kill":{ if procNr >=0 && procNr <len(runningProcs){
+					programmKill(procNr)
+					fmt.Fprintf(w,"Prozess "+welchesProgramm+"("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
+					}}
+	case "term":{ if procNr >=0 && procNr <len(runningProcs){			
+					programmTerminate(procNr)
+					fmt.Fprintln(w,"Beendigungsanfrage an Prozess "+welchesProgramm+"("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
+				    }}
+    case "stop":{ if procNr >=0 && procNr <len(runningProcs){			
+					programmStop(procNr)
+					fmt.Fprintln(w,"Stop-Befehl für "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") wurde gestartet.")
+				    }}
+	case "autostart":{	if procNr >=0 && procNr <len(runningProcs){		//toggle Restartoption for running processes, for new processes wins the xml-config!
+					runningProcs[procNr].Restart=!runningProcs[procNr].Restart	//you can also revive dead procs... or vice-versa
+	}}				
+	default: fmt.Println("default")
+	}
+	
 }
-
 func webServer(){
 //	 http.HandleFunc("/", Home)
 //    http.HandleFunc("/about/", About)
@@ -380,7 +402,7 @@ go watchFile()		//Veränderungen an der XML erkennen, ggfs. neu einlesenr
 }
 
 func programFlow(){
-	fmt.Println(time.Now())
+//	fmt.Println(time.Now())
 	//Ablauf über HTTPHandler, momentan simuliert...
 	//Einfach mal ein paar willkürliche Aufrufe...
 	go programmStart(0)		
@@ -400,7 +422,6 @@ func programFlow(){
 	time.Sleep(2 * time.Second)
 	programmStop(0)
 	programmStop(0)
-//	go programmStop(0)
 	
 	//			fmt.Printf("Hier kann jetzt parallel anderer Kram passieren.\n\n")
 //TODO: MUTEX AUF GLOBALES ZEUG [ok], TIME WARTENS EINBAUEN, PROCESS EXIT STATE FÜR PROCESSLISTE[atm], stopprocesses in aktuelle prozessliste
@@ -451,6 +472,15 @@ func checkError(err error) {
 //cmd_peter.Process.Signal(os.Interrupt)
 //cmd.Process.Signal(os.Kill)
 //cmd_peter.Process.Signal(os.Kill)
+ 
+//TODO 
+//Fehlerbehandlung
+//Logging mit PID
+//Tests!!!
+//Diagramm
+//SSL
+//Hashes!
+//Website
 /*
 type EntetiesClass struct {
     Name string
