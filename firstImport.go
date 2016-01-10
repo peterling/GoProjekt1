@@ -18,6 +18,7 @@ import (
 	"sync"
 	"runtime"
 	"crypto/sha1"
+	"net/http"
 )
 
 type xmlConfig struct {
@@ -156,14 +157,16 @@ var mutExRunningProcs = &sync.RWMutex{}
 //var mutexStopperProcSlice = &sync.Mutex{}
 const configPath string = "config.xml"
 const programmAuswahl int = 1	//wählen, welches Programm gestartet werden soll - IRL vom HTTPHandler
-const runningProcsLengthTreshold int = 5	//maybe 10000
-const runningProcsLengthInterval int = 10	//maybe 1000
+const runningProcsLengthTreshold int = 10	//maybe 10000
+const runningProcsLengthInterval int = 5	//maybe 1000
 
 func runningProcsLengthCheck(){
 	fmt.Println("Lengthcheck started!")
 	mutExRunningProcs.Lock()
 	if len(runningProcs) > runningProcsLengthTreshold{
-		fmt.Println("Hey, ist zu lang!")
+	mutExRunningProcsReorged.Lock()
+	runningProcsReorged = time.Now()
+	mutExRunningProcsReorged.Unlock()
 		runningProcsNew = nil
 		for r:=range runningProcs{
 			if runningProcs[r].Alive == true || runningProcs[r].Restart == true {
@@ -211,6 +214,24 @@ func watchFile() error {
     }
     return nil
 }
+var runningProcsReorged time.Time = time.Now()
+var mutExRunningProcsReorged = &sync.RWMutex{}
+
+func hashOfRunningProcs(){		//runningProcsListe könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
+	h := sha1.New()				//falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
+	mutExRunningProcs.RLock()
+	mutExRunningProcsReorged.RLock()
+
+		h.Write([]byte(runningProcsReorged.String()))
+	
+	mutExRunningProcs.RUnlock()
+	mutExRunningProcsReorged.RUnlock()
+	runtime.Gosched()
+	    bs := h.Sum(nil)
+fmt.Printf("%x\n", bs)
+}
+//Better values for hashing, I think...
+/*
 func hashOfRunningProcs(){		//runningProcsListe könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
 	h := sha1.New()				//falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
 	mutExRunningProcs.RLock()
@@ -224,18 +245,63 @@ func hashOfRunningProcs(){		//runningProcsListe könnte reorganisiert worden sei
 	    bs := h.Sum(nil)
 fmt.Printf("%x\n", bs)
 }
-
+*/
 func main() {
 	//Programminitialisierung
 	xmlReadIn()			//XML-Datei einlesen lassen
 	go helperRoutinesStarter()		//runs in the background for important tasks
+	
 	go programFlow()	//Aufrufe in Goroutine starten, später HTTP, jetzt hardcoded
-
+webServer()
 	//hier adden!
 
 	 fmt.Scanln()		//Programm weiterlaufen lassen ohne Ende //endpoint
 }
+
+func ProcControl(w http.ResponseWriter, r *http.Request) {
+    r.ParseForm()  // parse arguments, you have to call this by yourself
+    fmt.Println(r.Form)  // print form information in server side
+    //fmt.Println("path", r.URL.Path)
+    //fmt.Println("scheme", r.URL.Scheme)
+   // fmt.Println(r.Form["url_long"])
+    for k, v := range r.Form {
+        fmt.Println("key:", k)
+        fmt.Println("val:", strings.Join(v, ""))
+    }
 	
+	welchesProgramm := strings.Join(r.Form["program"],"")
+	wasTun:=strings.Join(r.Form["aktion"],"")
+	//	fmt.Fprintln(w, welchesProgramm)
+	//	fmt.Fprintln(w, wasTun)
+		
+	procNr,_:=strconv.Atoi(welchesProgramm)
+	if procNr >=0 && procNr <len(runningProcs){		//Wenn Prozess in Liste... dann
+		fmt.Fprintln(w,welchesProgramm)
+		fmt.Fprintln(w,"Prozess vorhanden")
+		fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde")
+			 if wasTun=="starten"{
+				programmStart(procNr)
+		        fmt.Fprintln(w, "gestartet")
+			    } else if wasTun=="beenden"{
+		        fmt.Fprintln(w, "beendet")
+		  	  } else {
+		       fmt.Fprintln(w, "nix wurde gemacht, falscher Aufruf!")}
+			
+				}else{		//Wenn Prozess nicht vorhanden, dann
+				fmt.Fprintln(w,"Programm nix da!")
+				}
+}
+
+func webServer(){
+//	 http.HandleFunc("/", Home)
+//    http.HandleFunc("/about/", About)
+	http.HandleFunc("/proccontrol", ProcControl)
+    err := http.ListenAndServe(":8000", nil)
+    if err != nil {
+        log.Fatal("ListenAndServe: ", err)
+    }
+}
+
 func programmTerminate(progra int){
 	mutExRunningProcs.RLock()
 	if progra < len(runningProcs) && progra >= 0{
@@ -314,6 +380,7 @@ go watchFile()		//Veränderungen an der XML erkennen, ggfs. neu einlesenr
 }
 
 func programFlow(){
+	fmt.Println(time.Now())
 	//Ablauf über HTTPHandler, momentan simuliert...
 	//Einfach mal ein paar willkürliche Aufrufe...
 	go programmStart(0)		
