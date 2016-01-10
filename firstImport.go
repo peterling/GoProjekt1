@@ -37,21 +37,12 @@ type process struct {
 }
 
 var runningProcs = make([] process,0)		//all ever spawned processes in a struct
+var runningProcsNew = make([] process,0)
 var	v = xmlConfig{}							//the read-in configuration struct
 
-func helperCheckRestart(){
-for {
-	go checkForRestart()
-	time.Sleep(3 * time.Second)
-	}
-}
-
-func checkForRestart(){
-	updateProcAliveState()
-	for r:=range runningProcs{		//für alle einträge im restartslice
-		if	runningProcs[r].Restart==true && runningProcs[r].Alive==false{//wenn restart-switch on für appl, nur dann...	
-			
-			var befehlKomplett string = runningProcs[r].StartCmd//procSliceStartCmd[r]
+func restartProc(r int){
+	//mutExRunningProcs.Lock()
+		var befehlKomplett string = runningProcs[r].StartCmd
 			befehlSplit :=strings.Split(befehlKomplett," ")	
 			cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
 
@@ -63,7 +54,8 @@ func checkForRestart(){
 										runningProcs[r].Restart,
 										true})		//Restart should be true
 			runningProcs[r].Restart=false			//Beim bisherigen Eintrag Restart deaktivieren
-
+//mutExRunningProcs.Unlock()
+//runtime.Gosched()
 
 			logFile:=openLogFile("len(runningProcs)")
 
@@ -72,8 +64,25 @@ func checkForRestart(){
 			cmd.Run()		//ARGH!""§
 			//cmd.Start()
 			//cmd.Wait()
+}
+
+func checkForRestart(){
+	mutExRunningProcs.Lock()
+	fmt.Println("CHECK FOR RESTART BEGINN")
+	for r:=range runningProcs{		//für alle einträge im restartslice
+	asd := runningProcs[r].Handle.ProcessState.String()
+		if	runningProcs[r].Restart==true && strings.HasPrefix(asd, "exit")==true{//wenn restart-switch on für appl, nur dann...	
+			//exit status 0,1,... want them all!
+			fmt.Println("CHECK FOR RESTART vor restartPROC")
+			go restartProc(r)		//ohne GOROUTINE hängt ?!! wegen run/start in restartProc! sonst nicht überwacht wenn start statt run!
+				fmt.Println("CHECK FOR RESTART nach restartPROC")
+		
 		}
+	
 	}
+mutExRunningProcs.Unlock()
+runtime.Gosched()
+fmt.Println("CHECK FOR RESTART ENDE")
 }
 /*
 func checkForRestart(){
@@ -152,13 +161,15 @@ func programmStart(programmNr int){
 	//    checkError(err)
 	//	go io.Copy(os.Stdout, stdout)
 	//   go io.Copy(os.Stderr, stderr)
+	mutExRunningProcs.Lock()
 	runningProcs = append(runningProcs, process{cmd,
 					v.ProgrammNamenListe[programmNr],
 					v.ProgrammStopListe[programmNr],
 					befehlKomplett,
 					v.ProgrammRestartListe[programmNr],
 					true})
-
+mutExRunningProcs.Unlock()
+runtime.Gosched()
 	logFile:=openLogFile(v.ProgrammNamenListe[programmNr])
 
 	defer logFile.Close()
@@ -184,10 +195,36 @@ func programmStart(programmNr int){
 }
 
 var mutExRunningProcs = &sync.RWMutex{}
-var mutexStopperProcSlice = &sync.Mutex{}
+//var mutexStopperProcSlice = &sync.Mutex{}
 const configPath string = "config.xml"
 const programmAuswahl int = 1	//wählen, welches Programm gestartet werden soll - IRL vom HTTPHandler
+const runningProcsLengthTreshold int = 5	//maybe 10000
+const runningProcsLengthInterval time.Duration = time.Second*1	//maybe 1000
 
+func runningProcsLengthCheck(){
+	mutExRunningProcs.Lock()
+	
+	if len(runningProcs) > runningProcsLengthTreshold{
+		fmt.Println("Hey, ist zu lang!")
+		runningProcsNew = nil
+		for r:=range runningProcs{
+			if runningProcs[r].Alive == true || runningProcs[r].Restart == true {
+				runningProcsNew = append(runningProcsNew, runningProcs[r])
+			}
+		
+		
+		}
+		//copy (runningProcsNew, runningProcs)
+		runningProcs = nil
+		for r:=range runningProcsNew{
+			runningProcs = append(runningProcs, runningProcsNew[r])
+		}
+		fmt.Println(runningProcsNew)
+	}
+	
+	mutExRunningProcs.Unlock()
+	runtime.Gosched()
+}
 func xmlReadIn(){			//XML-Datei wird eingelesen
 	xmlContent, _ := ioutil.ReadFile(configPath)
 	err := xml.Unmarshal(xmlContent, &v)
@@ -225,6 +262,7 @@ func main() {
 	//Programminitialisierung
 	xmlReadIn()			//XML-Datei einlesen lassen
 	go watchFile()		//Veränderungen an der XML erkennen, ggfs. neu einlesen [background]
+	go helperRoutinesStarter()
 	go programFlow()	//Aufrufe in Goroutine starten, später HTTP, jetzt hardcoded
 
 	//hier adden!
@@ -262,7 +300,7 @@ func programmKill(progra int){
 }
 	
 func programmStop(progra int){
-	mutExRunningProcs.RLock()
+	mutExRunningProcs.Lock()
 	if progra <len(runningProcs) && progra >= 0{
 		//defer if processstate war nicht exit... dann .kill ?
 		//	fmt.Println(progra)
@@ -279,7 +317,7 @@ func programmStop(progra int){
 	    checkError(err)
 		go io.Copy(os.Stdout, stdout)
 	    go io.Copy(os.Stderr, stderr)
-		mutexStopperProcSlice.Lock()
+//		mutexStopperProcSlice.Lock()
 		//stopperProcSlice = append(stopperProcSlice, cmd) //Befehl zum Stoppen könnte auch hängen, Name wird aber nicht gespeichert (overKill)
 		runningProcs = append(runningProcs, process{cmd,
 											"STOP: "+runningProcs[progra].Name,
@@ -293,76 +331,77 @@ func programmStop(progra int){
 		//cmd.Start()		//dann Status direkt bei Feuern des Prozesses
 		fmt.Println("Der für das Programm "+befehlKomplett+" mit PID "+ strconv.Itoa(runningProcs[progra].Handle.Process.Pid)+" ursprünglich hinterlegte Stop-Befehl wurde ausgeführt")
 	}
-	mutExRunningProcs.RUnlock()
+	mutExRunningProcs.Unlock()
 	runtime.Gosched()
 }
-
+func helperRoutinesStarter(){
+	
+for {
+	updateProcAliveState()	//blockt wenn keine goroutine
+	time.Sleep(1 * time.Second)
+	checkForRestart()	//	((HIER MIT GO SONST HÄNGT))
+	time.Sleep(3 * time.Second)
+	processeAufKonsoleAusgeben()
+	time.Sleep(runningProcsLengthInterval)
+	runningProcsLengthCheck()
+	}
+}
 func programFlow(){
 	//Ablauf über HTTPHandler, momentan simuliert...
 	//Einfach mal ein paar willkürliche Aufrufe...
-	go processeAufKonsoleAusgeben()
-	go updateProcAliveState()
-	processeAufKonsoleAusgeben()
-	go helperCheckRestart()
+
 	//go checkForRestart()
-	go programmStart(0)
-	go programmStart(1)
+	go programmStart(0)		
+	go programmStart(0)		//goroutine not necessary for programmSTart
 	go programmStart(1)
 	time.Sleep(2 * time.Second)
-	go programmKill(0)
-	time.Sleep(1 * time.Second)
-	//go programmKill(1)
-	go programmTerminate(1)
-	processeAufKonsoleAusgeben()
-	//go programmKill(2)
-	go programmTerminate(2)
-	go programmTerminate(-1)
-	go programmKill(3)
-	go programmKill(4)
-	//	go programmKill(1) //check if exists/running und ob erfolgreich...
-	time.Sleep(3 * time.Second)
-	//	programmStop(1)
-	processeAufKonsoleAusgeben()
-	go	programmStop(0)
-	go	programmStop(0)
-	go programmStop(0)
-	time.Sleep(3 * time.Second)
-	processeAufKonsoleAusgeben()
-	//procRestartEnabled[0]=true	//mal für ein programm den restart enablen
-		
+	programmKill(0)			//goroutine not necessary for programmKill
+	programmKill(5)			//goroutine not necessary for programmKill doesn't block even with wrong param :)
+	programmKill(1)			//goroutine not necessary for programmKill
+	programmKill(2)			//goroutine not necessary for programmKill
+//	go programmTerminate(1)
+//	processeAufKonsoleAusgeben()
+//	go programmKill(2)
+//	go programmTerminate(2)
+//	go programmTerminate(-1)
+//	time.Sleep(2 * time.Second)
+//	go programmStop(0)
+//	go programmStop(0)
+//	go programmStop(0)
+	
 	//			fmt.Printf("Hier kann jetzt parallel anderer Kram passieren.\n\n")
 //TODO: MUTEX AUF GLOBALES ZEUG [ok], TIME WARTENS EINBAUEN, PROCESS EXIT STATE FÜR PROCESSLISTE[atm], stopprocesses in aktuelle prozessliste
 }
 
 func updateProcAliveState(){
-	for {
+	mutExRunningProcs.Lock()
 	for r:= range runningProcs{
 		asd := runningProcs[r].Handle.ProcessState.String()
 		if strings.HasPrefix(asd, "exit")==true{ //exit status 0,1,... want all of them!
-		fmt.Println(asd)
 		runningProcs[r].Alive=false
+		}
 	}
-	
-	}
-	time.Sleep(1 * time.Second)
-	}
+	mutExRunningProcs.Unlock()
+	runtime.Gosched()
 }
+
 func processeAufKonsoleAusgeben(){
 	var procSliceNotExited = make([]string, 0)	//copy, so we don't mix up the original list
-
-	for k:= range runningProcs {
-		asd := runningProcs[k].Handle.ProcessState.String()
+mutExRunningProcs.Lock()
+	for r:= range runningProcs {
+		asd := runningProcs[r].Handle.ProcessState.String()
 		//	asd := procSlice[k].ProcessState.String()
 		//	asd:=procState.String()
 		if strings.HasPrefix(asd, "exit")==false{ //exit status 0,1,... don't want any of them!
-			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(k)+", "+runningProcs[k].Name+runningProcs[k].StopCmd)
+			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(r)+", "+runningProcs[r].Name+" "+runningProcs[r].StopCmd)
 			//procSliceNotExited = append(procSliceNotExited, strconv.Itoa(k)+", "+procSliceNameAndStopcmd[k])
 		}
 	}
-
+mutExRunningProcs.Unlock()
+runtime.Gosched()
 	fmt.Print("noch laufende, not-exited processe: ")
 	fmt.Println(procSliceNotExited) //diesen für die website zur anzeige der laufenden prozesse verwenden
-	fmt.Print("zusätzlich noch laufende, [todo:nur not-exited!] STOP-processe: ")
+//	fmt.Print("zusätzlich noch laufende, [todo:nur not-exited!] STOP-processe: ")
 //	fmt.Println(stopperProcSlice) //diesen für die website zur anzeige der laufenden prozesse verwenden
 }
 
@@ -373,7 +412,7 @@ func checkError(err error) {
 }
 
 //	stdout_peter, err_peter := cmd_peter.StdoutPipe()	//in buffer loaden, pro process ODER PRO PROGRAMM... ?!
-// TODO: irgendwann slice overload... not endless
+
 //signal.Notify(stdin, os.Interrupt)
 
 //unter Windows funktioniert nur Kill, nicht Interrupt.
@@ -381,7 +420,7 @@ func checkError(err error) {
 //cmd_peter.Process.Signal(os.Interrupt)
 //cmd.Process.Signal(os.Kill)
 //cmd_peter.Process.Signal(os.Kill)
-/*	von Fabi TO_CHECK
+/*
 type EntetiesClass struct {
     Name string
     Value *exec.Cmd
