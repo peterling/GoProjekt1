@@ -72,6 +72,7 @@ func restartProc(r int){
 
 
 	const tpl = `
+	
 <!DOCTYPE html>
 <html>
 	<head>
@@ -80,21 +81,16 @@ func restartProc(r int){
 	</head>
 	<body>
 	<h1>Starten</h1>
- {{range $index, $results := .Programme}}         
-        <tr>
-            <td>{{$index}}</td>
-
-            </tr>
-        {{end}}
-		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog=">{{. }}</a><br>{{end}}
-		{{.ProgrammHash}}
-		{{range .Programme}}<div>{{. }}</div>{{else}}<div><strong>no rows</strong></div>{{end}}
+		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
 	<h1>Überwachen</h1>	
-		{{range .Prozesse}}<div>{{. }}</div>{{else}}<div><strong>no rows</strong></div>{{end}}
-		
+		{{range $index, $results := .Prozesse}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.}}</a><br>{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 		<p>Prozesshash:</p>{{.ProzessHash}}
 	</body>
 </html>`
+	//	{{testo}}
+	//	{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog=">{{.}}</a><br>{{end}}{{.StartingLink}}
+	
+	//		{{$p := .ProzessHash}}{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$p}}">{{.}}</a><br>{{end}}{{.StartingLink}}
 
 func TestHandler(w http.ResponseWriter, r *http.Request) {
 	 t:= template.Must(template.New("control").Parse(tpl)) // Create a template.
