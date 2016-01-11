@@ -38,6 +38,7 @@ type process struct {
 	StartCmd	string
 	Restart		bool
 	Alive		bool
+	StartCount	int
 }
 
 var runningProcs = make([] process,0)		//all ever spawned processes in a struct
@@ -56,7 +57,8 @@ func restartProc(r int){
 										runningProcs[r].StartCmd,
 										//true})
 										runningProcs[r].Restart,
-										true})		//Restart should be true
+										true,
+										runningProcs[r].StartCount+1})		//Restart should be true
 			runningProcs[r].Restart=false			//Beim bisherigen Eintrag Restart deaktivieren
 //mutExRunningProcs.Unlock()
 //runtime.Gosched()
@@ -110,7 +112,7 @@ function goBack() {
 	
 		{{range $index, $results := .Programme}}<a class="postlink" href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
 	<h1>Überwachen: Laufende Prozesse hart beenden (SIGKILL)</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}},{{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 	<h1>Überwachen: Laufende Prozesse weich beenden (SIGTERM)</h1>	
 		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=term&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 	<h1>Überwachen: Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>	
@@ -209,7 +211,8 @@ func programmStart(programmNr int){
 					v.ProgrammStopListe[programmNr],
 					befehlKomplett,
 					v.ProgrammRestartListe[programmNr],
-					true})
+					true,
+					1})
 mutExRunningProcs.Unlock()
 runtime.Gosched()
 	logFile:=openLogFile(v.ProgrammNamenListe[programmNr])
@@ -469,7 +472,8 @@ func programmStop(progra int){
 											runningProcs[progra].StopCmd,
 											runningProcs[progra].StopCmd,		//for support of restart process procedure...
 											false,							//Stop-Command usually fired once!
-											true})
+											true,
+											1})
 		cmd.Run()		//dann Status erst nach Abschluss des Prozesses
 		//cmd.Wait()
 		//cmd.Start()		//dann Status direkt bei Feuern des Prozesses
