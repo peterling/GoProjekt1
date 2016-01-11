@@ -69,6 +69,9 @@ func restartProc(r int){
 			//cmd.Start()
 			//cmd.Wait()
 }
+func Download(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "config.xml")
+	}
 
 const backTemplate = `
 <!DOCTYPE html>
@@ -101,6 +104,8 @@ function goBack() {
 	</head>
 	<body>
 	<input type="button" value="Seite aktualisieren" onClick="window.location.reload()">
+	<input type="button" value="XML-Datei herunterladen" onClick="window.location.href='/download'">
+	<a href="/download">XML-Datei (Rechtsklick zum Speichern)</a>
 	<h1>Programm starten</h1>
 	
 		{{range $index, $results := .Programme}}<a class="postlink" href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
@@ -335,8 +340,7 @@ func main() {
 	//Programminitialisierung
 	xmlReadIn()			//XML-Datei einlesen lassen
 	go helperRoutinesStarter()		//runs in the background for important tasks
-	
-	go programFlow()	//Aufrufe in Goroutine starten, später HTTP, jetzt hardcoded
+	//go programFlow()	//Aufrufe in Goroutine starten, später HTTP, jetzt hardcoded
 webServer()
 	//hier adden!
 
@@ -409,6 +413,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 func webServer(){
 //	 http.HandleFunc("/", Home)
 //    http.HandleFunc("/about/", About)
+	http.HandleFunc("/download", Download)
 	http.HandleFunc("/test", TestHandler)
 	http.HandleFunc("/proccontrol", ProcControl)
     err := http.ListenAndServe(":8000", nil)
