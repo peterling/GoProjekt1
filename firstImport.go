@@ -20,6 +20,7 @@ import (
 	"crypto/sha1"
 	"net/http"
 	"encoding/hex"
+	"html/template"
 )
 
 type xmlConfig struct {
@@ -67,6 +68,56 @@ func restartProc(r int){
 			cmd.Run()		//ARGH!""§
 			//cmd.Start()
 			//cmd.Wait()
+}
+
+
+	const tpl = `
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>{{.Titel}}</title>
+	</head>
+	<body>
+	<h1>Starten</h1>
+ {{range $index, $results := .Programme}}         
+        <tr>
+            <td>{{$index}}</td>
+
+            </tr>
+        {{end}}
+		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog=">{{. }}</a><br>{{end}}
+		{{.ProgrammHash}}
+		{{range .Programme}}<div>{{. }}</div>{{else}}<div><strong>no rows</strong></div>{{end}}
+	<h1>Überwachen</h1>	
+		{{range .Prozesse}}<div>{{. }}</div>{{else}}<div><strong>no rows</strong></div>{{end}}
+		
+		<p>Prozesshash:</p>{{.ProzessHash}}
+	</body>
+</html>`
+
+func TestHandler(w http.ResponseWriter, r *http.Request) {
+	 t:= template.Must(template.New("control").Parse(tpl)) // Create a template.
+
+	data := struct {
+		Titel string
+		Programme []string
+		Prozesse []process
+		ProgrammHash string
+		ProzessHash string
+	}{
+		Titel: "Observer",
+		Programme: v.ProgrammNamenListe,
+		Prozesse: runningProcs ,
+		ProgrammHash: hashOfProgrammListe(),
+		ProzessHash: hashOfRunningProcs(),
+		/*[]string{
+			"Programm1",
+			"Programm2",
+		},*/
+	}
+
+	t.Execute(w,data)
 }
 
 func checkForRestart(){
@@ -225,7 +276,7 @@ var programmListeReorged time.Time = time.Now()
 var mutExRunningProcsReorged = &sync.RWMutex{}
 var mutExProgrammListeReorged = &sync.RWMutex{}
 
-func hashOfProgrammListe(){		//Programmliste könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
+func hashOfProgrammListe()string{		//Programmliste könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
 	h := sha1.New()				//falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
 	mutExProgrammListeReorged.RLock()
 
@@ -234,7 +285,8 @@ func hashOfProgrammListe(){		//Programmliste könnte reorganisiert worden sein. 
 	mutExProgrammListeReorged.RUnlock()
 	runtime.Gosched()
 	    bs := h.Sum(nil)
-fmt.Printf("%x\n", bs)
+fmt.Printf("ProgrammListe: %x\n", bs)
+return hex.EncodeToString(bs)
 }
 
 func hashOfRunningProcs()string{		//runningProcsListe könnte reorganisiert worden sein. Daher beim Ausführen über HTTP Hash abgleichen...
@@ -247,7 +299,7 @@ func hashOfRunningProcs()string{		//runningProcsListe könnte reorganisiert word
 	runtime.Gosched()
 	    bs := h.Sum(nil)
 
-fmt.Printf("%x\n", bs)
+fmt.Printf("RunningProcs: %x\n", bs)
 return hex.EncodeToString(bs)
 }
 
@@ -279,7 +331,8 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	
 	welchesProgramm := strings.Join(r.Form["program"],"")
 	wasTun:=strings.Join(r.Form["aktion"],"")
-	hash:=strings.Join(r.Form["hash"],"")		//hash für Versionsabgleich der Listen(Processe und Programme)
+	hashProc:=strings.Join(r.Form["hashproc"],"")		//hash für Versionsabgleich der Listen(Processe)
+	hashProg:=strings.Join(r.Form["hashprog"],"")		//hash für Versionsabgleich der Listen(Programme)
 	//	fmt.Fprintln(w, welchesProgramm)
 	//	fmt.Fprintln(w, wasTun)
 	procNr,_:=strconv.Atoi(welchesProgramm)
@@ -288,26 +341,26 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	//if strings.Compare(hash, string(hashOfRunningProcs()))==0{
 	
 	 switch wasTun {		//same identifier procNr for ProgrammID and ProcID...
-     case "start":{ if procNr >=0 && procNr <len(v.ProgrammStartListe) && hash==hashOfRunningProcs() {
+     case "start":{ if procNr >=0 && procNr <len(v.ProgrammStartListe) && hashProg==hashOfProgrammListe() {
 					fmt.Fprintln(w,welchesProgramm)
 			//		fmt.Println(strconv.FormatBool(hash==hashOfRunningProcs()) )
 					fmt.Fprintln(w,"Programm in StartListe vorhanden")
 					programmStart(procNr)
 					fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde gestartet");
 					}}
-    case "kill":{ if procNr >=0 && procNr <len(runningProcs){
+    case "kill":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){
 					programmKill(procNr)
 					fmt.Fprintf(w,"Prozess "+welchesProgramm+"("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
 					}}
-	case "term":{ if procNr >=0 && procNr <len(runningProcs){			
+	case "term":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					programmTerminate(procNr)
 					fmt.Fprintln(w,"Beendigungsanfrage an Prozess "+welchesProgramm+"("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
 				    }}
-    case "stop":{ if procNr >=0 && procNr <len(runningProcs){			
+    case "stop":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					programmStop(procNr)
 					fmt.Fprintln(w,"Stop-Befehl für "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") wurde gestartet.")
 				    }}
-	case "autostart":{	if procNr >=0 && procNr <len(runningProcs){		//toggle Restartoption for running processes, for new processes wins the xml-config!
+	case "autostart":{	if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){		//toggle Restartoption for running processes, for new processes wins the xml-config!
 					runningProcs[procNr].Restart=!runningProcs[procNr].Restart	//you can also revive dead procs... or vice-versa
 	}}				
 	default: fmt.Println("default")
@@ -317,6 +370,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 func webServer(){
 //	 http.HandleFunc("/", Home)
 //    http.HandleFunc("/about/", About)
+	http.HandleFunc("/test", TestHandler)
 	http.HandleFunc("/proccontrol", ProcControl)
     err := http.ListenAndServe(":8000", nil)
     if err != nil {
@@ -385,7 +439,8 @@ func helperRoutinesStarter(){
 var i int = 0			//count helper-runs for firing the lengthCheck
 go watchFile()		//Veränderungen an der XML erkennen, ggfs. neu einlesenr
 	for {
-		hashOfRunningProcs()
+		//hashOfRunningProcs()	//placed in runningProcsLengthCheck
+		//hashOfProgrammListe()	//placed in XMLRead
 	fmt.Println("Helper re-run "+strconv.Itoa(i))
 	fmt.Println("Number of goroutines running "+strconv.Itoa(runtime.NumGoroutine()))
 	updateProcAliveState()
