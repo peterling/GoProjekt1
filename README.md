@@ -14,3 +14,5 @@ Dasselbe gilt für die Programmliste, die nach Änderungen der XML-Datei ebenfal
 //TODO: Meldung, wenn Hashes sich unterscheiden.
 
 Der URL-Parameter kann sowohl die Prozess- als auch die Programmnummer beschreiben (kontextabhängig).
+
+Die Anzahl der Starts gilt pro Prozess und bleibt auch nach Deaktivierung (und ggfs. erneuter Aktivierung) der Autostart-Funktion erhalten.
