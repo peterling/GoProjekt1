@@ -382,17 +382,17 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 					t.Execute(w,v)
 					fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde gestartet");
 					}}
-    case "kill":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){
+    case "kill":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){
 					programmKill(procNr)
 					t.Execute(w,v)
 					fmt.Fprintf(w,"Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
 					}}
-	case "term":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
+	case "term":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					programmTerminate(procNr)
 					t.Execute(w,v)
 					fmt.Fprintln(w,"Beendigungsanfrage an Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
 					}}
-    case "stop":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
+    case "stop":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					programmStop(procNr)
 					t.Execute(w,v)
 					fmt.Fprintln(w,"Stop-Befehl für "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") wurde gestartet.")
@@ -401,9 +401,10 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 					runningProcs[procNr].Restart=!runningProcs[procNr].Restart	//you can also revive dead procs... or vice-versa
 					t.Execute(w,v)
 					}}
-	default: fmt.Println("default")
+	default: 		{t.Execute(w,v)
+					fmt.Fprintln(w,"Seite war nicht mehr aktuell oder Aufruf ungültig! Bitte erneut versuchen!")
+	}			//nur wenn aktionskennung falsch, meldung. und meldung, dass befehl ausgeführt worden wäre. dies beides noch ändern
 	}
-	
 }
 func webServer(){
 //	 http.HandleFunc("/", Home)
