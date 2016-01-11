@@ -1,18 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <applications>
 <application>
-<name>ping auf start0</name>
-<start>cmd</start>
+<name>paint</name>
+<start>mspaint.exe</start>
 <stop>ping stopp0.de -4</stop>
+<restart>false</restart>
 </application>
 <application>
-<name>ping auf start1.de</name>
-<start>ping start1.de -4</start>
+<name>command prompt</name>
+<start>cmd.exe</start>
 <stop>ping stopp1.de -4</stop>
+<restart>false</restart>
 </application>
 <application>
 <name>ping auf googleDNS</name>
-<start>ping 8.8.8.8 -4 -n 6</start>
+<start>ping 8.8.8.8 -4</start>
 <stop>ping stopDNS.de</stop>
+<restart>false</restart>
+</application>
+<application>
+<name>rechner</name>
+<start>calc.exe</start>
+<stop>ping stopp1.de -4</stop>
+<restart>false</restart>
+</application>
+<application>
+<name>rechner</name>
+<start>calc.exe</start>
+<stop>ping stopp1.de -4</stop>
+<restart>false</restart>
 </application>
 </applications>
