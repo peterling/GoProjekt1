@@ -70,8 +70,28 @@ func restartProc(r int){
 			//cmd.Wait()
 }
 
+const backTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="refresh" content="3; url=./test" />
+</head>
+<body>
 
-	const tpl = `
+<button onclick="goBack()">Zurück</button>
+
+<p>Befehl wurde ausgeführt! Zurück in 3 Sekunden...</p>
+
+<script>
+function goBack() {
+	window.location.href = "test";
+}
+</script>
+
+</body>
+</html>
+`
+	const uebersichtTemplate = `
 	
 <!DOCTYPE html>
 <html>
@@ -80,20 +100,30 @@ func restartProc(r int){
 		<title>{{.Titel}}</title>
 	</head>
 	<body>
-	<h1>Starten</h1>
-		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
-	<h1>Überwachen</h1>	
-		{{range $index, $results := .Prozesse}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.}}</a><br>{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-		<p>Prozesshash:</p>{{.ProzessHash}}
+	<input type="button" value="Seite aktualisieren" onClick="window.location.reload()">
+	<h1>Programm starten</h1>
+	
+		{{range $index, $results := .Programme}}<a class="postlink" href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
+	<h1>Überwachen: Laufende Prozesse hart beenden (SIGKILL)</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Überwachen: Laufende Prozesse weich beenden (SIGTERM)</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=term&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Überwachen: Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=stop&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Autostart-Option eines laufenden Prozesses (de-)aktivieren</h1>
+		{{range $index, $results := .Prozesse}}{{if .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Autostart bereits beendeter Prozesse (de-)aktivieren [revive/dismiss]</h1>
+		{{range $index, $results := .Prozesse}}{{if not .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+
 	</body>
 </html>`
-	//	{{testo}}
 	//	{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog=">{{.}}</a><br>{{end}}{{.StartingLink}}
-	
-	//		{{$p := .ProzessHash}}{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$p}}">{{.}}</a><br>{{end}}{{.StartingLink}}
+	//		{{range $index, $results := .Programme}}<a class="postlink" href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}" onClick="window.location.reload();return false;">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
 
+	//		{{$p := .ProzessHash}}{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$p}}">{{.}}</a><br>{{end}}{{.StartingLink}}
+//HEAD <meta http-equiv="refresh" content="3" />
 func TestHandler(w http.ResponseWriter, r *http.Request) {
-	 t:= template.Must(template.New("control").Parse(tpl)) // Create a template.
+	 t:= template.Must(template.New("control").Parse(uebersichtTemplate)) // Create a template.
 
 	data := struct {
 		Titel string
@@ -184,8 +214,8 @@ runtime.Gosched()
 	cmd.Run()
 	
 	//defer logFile.Close()	//sinnvoll?
-	cmd.Stdout=logFile
-	cmd.Run()
+//	cmd.Stdout=logFile
+//	cmd.Run()
 	//	cmd.Start() //??besser?? weil bei start kein processstate abrufbar ?!
 	fmt.Printf(v.ProgrammNamenListe[programmNr]+" wurde gestartet, ") //auf diese ausgabe ist kein verlass (kein real time, erst nach beendigung der funktion)
 	fmt.Printf("PID %d\n",cmd.Process.Pid)
@@ -238,6 +268,8 @@ mutExProgrammListeReorged.Unlock()
 runtime.Gosched()
 hashOfProgrammListe()
 	xmlContent, _ := ioutil.ReadFile(configPath)
+	//err:= xml.Unmarshal(nil, &v)		//bei Neu-Einlesen soll nicht appendet werden
+	v=xmlConfig{}	//leeren, damit nicht appendet wird bei Neu-Einlesen
 	err := xml.Unmarshal(xmlContent, &v)
 	if err != nil {
 		fmt.Printf("error: %v", err)
@@ -335,30 +367,40 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	
 //	if hash==string(hashOfRunningProcs()){
 	//if strings.Compare(hash, string(hashOfRunningProcs()))==0{
+	t:= template.Must(template.New("back").Parse(backTemplate))
 	
 	 switch wasTun {		//same identifier procNr for ProgrammID and ProcID...
      case "start":{ if procNr >=0 && procNr <len(v.ProgrammStartListe) && hashProg==hashOfProgrammListe() {
-					fmt.Fprintln(w,welchesProgramm)
+
+		//w.Write([]byte("asdaga"))
+			//		fmt.Fprintln(w,welchesProgramm)
 			//		fmt.Println(strconv.FormatBool(hash==hashOfRunningProcs()) )
-					fmt.Fprintln(w,"Programm in StartListe vorhanden")
-					programmStart(procNr)
+			//		fmt.Fprintln(w,"Programm in StartListe vorhanden")
+					go programmStart(procNr)		//evtl. goroutine ?!
+					
+					//t.Execute(w)
+					t.Execute(w,v)
 					fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde gestartet");
 					}}
     case "kill":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){
 					programmKill(procNr)
-					fmt.Fprintf(w,"Prozess "+welchesProgramm+"("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
+					t.Execute(w,v)
+					fmt.Fprintf(w,"Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
 					}}
 	case "term":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					programmTerminate(procNr)
-					fmt.Fprintln(w,"Beendigungsanfrage an Prozess "+welchesProgramm+"("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
-				    }}
+					t.Execute(w,v)
+					fmt.Fprintln(w,"Beendigungsanfrage an Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
+					}}
     case "stop":{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					programmStop(procNr)
+					t.Execute(w,v)
 					fmt.Fprintln(w,"Stop-Befehl für "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") wurde gestartet.")
 				    }}
 	case "autostart":{	if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){		//toggle Restartoption for running processes, for new processes wins the xml-config!
 					runningProcs[procNr].Restart=!runningProcs[procNr].Restart	//you can also revive dead procs... or vice-versa
-	}}				
+					t.Execute(w,v)
+					}}
 	default: fmt.Println("default")
 	}
 	
@@ -435,6 +477,7 @@ func helperRoutinesStarter(){
 var i int = 0			//count helper-runs for firing the lengthCheck
 go watchFile()		//Veränderungen an der XML erkennen, ggfs. neu einlesenr
 	for {
+		//fmt.Println(v)
 		//hashOfRunningProcs()	//placed in runningProcsLengthCheck
 		//hashOfProgrammListe()	//placed in XMLRead
 	fmt.Println("Helper re-run "+strconv.Itoa(i))
