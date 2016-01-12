@@ -2,7 +2,7 @@ package main
 
 import (
     "fmt"
-    "io"
+ //   "io"
 	"io/ioutil"
     "log"
     "os"
@@ -108,19 +108,19 @@ function goBack() {
 	<input type="button" value="Seite aktualisieren" onClick="window.location.reload()">
 	<input type="button" value="XML-Datei herunterladen" onClick="window.location.href='/download'">
 	<a href="/download">XML-Datei (Rechtsklick zum Speichern)</a>
-	<h1>Programm starten</h1>
+	<h1>Programme starten</h1>
 	
 		{{range $index, $results := .Programme}}<a class="postlink" href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
-	<h1>Überwachen: Laufende Prozesse hart beenden (SIGKILL)</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}},{{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Überwachen: Laufende Prozesse weich beenden (SIGTERM)</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=term&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Überwachen: Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=stop&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Autostart-Option eines laufenden Prozesses (de-)aktivieren</h1>
-		{{range $index, $results := .Prozesse}}{{if .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Autostart bereits beendeter Prozesse (de-)aktivieren [revive/dismiss]</h1>
-		{{range $index, $results := .Prozesse}}{{if not .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart {{.Restart}}, läuft {{.Alive}}</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Laufende Prozesse hart beenden (SIGKILL)</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Laufende Prozesse weich beenden (SIGTERM)</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=term&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=stop&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Restart-Option laufender Prozesse (de-)aktivieren</h1>
+		{{range $index, $results := .Prozesse}}{{if .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Restart-Option beendeter Prozesse (de-)aktivieren [revive/dismiss]</h1>
+		{{range $index, $results := .Prozesse}}{{if not .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 
 	</body>
 </html>`
@@ -375,6 +375,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 //	if hash==string(hashOfRunningProcs()){
 	//if strings.Compare(hash, string(hashOfRunningProcs()))==0{
 	t:= template.Must(template.New("back").Parse(backTemplate))
+	if welchesProgramm=="" {goto wrongHashOrValue}
 	
 	 switch wasTun {		//same identifier procNr for ProgrammID and ProcID...
      case "start":{ if procNr >=0 && procNr <len(v.ProgrammStartListe) && hashProg==hashOfProgrammListe() {
@@ -388,30 +389,33 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 					//t.Execute(w)
 					t.Execute(w,v)
 					fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde gestartet");
-					}}
+					}else {goto wrongHashOrValue}
+					}
     case "kill":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){
-					programmKill(procNr)
+					go programmKill(procNr)	//routine ja oder nein ?
 					t.Execute(w,v)
 					fmt.Fprintf(w,"Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
-					}}
+					}else {goto wrongHashOrValue}}
 	case "term":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
-					programmTerminate(procNr)
+					go programmTerminate(procNr)	//routine ja oder nein ?
 					t.Execute(w,v)
 					fmt.Fprintln(w,"Beendigungsanfrage an Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
-					}}
+					}else {goto wrongHashOrValue}}
     case "stop":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
-					programmStop(procNr)
+					go programmStop(procNr)	//evtl. goroutine!?
 					t.Execute(w,v)
 					fmt.Fprintln(w,"Stop-Befehl für "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") wurde gestartet.")
-				    }}
+				    }else {goto wrongHashOrValue}}
 	case "autostart":{	if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){		//toggle Restartoption for running processes, for new processes wins the xml-config!
 					runningProcs[procNr].Restart=!runningProcs[procNr].Restart	//you can also revive dead procs... or vice-versa
 					t.Execute(w,v)
-					}}
-	default: 		{t.Execute(w,v)
-					fmt.Fprintln(w,"Seite war nicht mehr aktuell oder Aufruf ungültig! Bitte erneut versuchen!")
+					}else {goto wrongHashOrValue}}
+	default: 		{//t.Execute(w,v)
+					fmt.Fprintln(w,"Ungültiger Aufruf! Bitte Seite neu laden und erneut versuchen!")
 	}			//nur wenn aktionskennung falsch, meldung. und meldung, dass befehl ausgeführt worden wäre. dies beides noch ändern
 	}
+	return
+	wrongHashOrValue:	fmt.Fprintln(w,"Falscher Aufruf oder Hash ungültig! Bitte Seite neu laden und erneut versuchen!")
 }
 func webServer(){
 //	 http.HandleFunc("/", Home)
@@ -461,12 +465,14 @@ func programmStop(progra int){
 		befehlKomplett :=runningProcs[progra].StopCmd
 		befehlSplit :=strings.Split(befehlKomplett," ")	
 		cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
-		stdout, err := cmd.StdoutPipe()
+		fmt.Println("STILL ALIVE123")
+	/*	stdout, err := cmd.StdoutPipe()
 	    checkError(err)
 	    stderr, err := cmd.StderrPipe()
 	    checkError(err)
-		go io.Copy(os.Stdout, stdout)
-	    go io.Copy(os.Stderr, stderr)
+		io.Copy(os.Stdout, stdout)		//with GO or otherwise the second time it crashes
+	    io.Copy(os.Stderr, stderr)*/		//with GO or otherwise the second time it crashes
+		fmt.Println("4123STILL ALIVE123")
 		runningProcs = append(runningProcs, process{cmd,
 											"STOP: "+runningProcs[progra].Name,
 											runningProcs[progra].StopCmd,
@@ -474,7 +480,9 @@ func programmStop(progra int){
 											false,							//Stop-Command usually fired once!
 											true,
 											1})
-		cmd.Run()		//dann Status erst nach Abschluss des Prozesses
+											
+		fmt.Println("KZUUKSTILL ALIVE123")
+		go cmd.Run()		//dann Status erst nach Abschluss des Prozesses routine important for long-lasting tasks!!!
 		//cmd.Wait()
 		//cmd.Start()		//dann Status direkt bei Feuern des Prozesses
 		fmt.Println("Der für das Programm "+befehlKomplett+" mit PID "+ strconv.Itoa(runningProcs[progra].Handle.Process.Pid)+" ursprünglich hinterlegte Stop-Befehl wurde ausgeführt")
