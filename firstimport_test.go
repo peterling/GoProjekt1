@@ -11,6 +11,8 @@ import (
 func TestError(t *testing.T) {
 
 	//	go helperRoutinesStarter()
+	//			if !(runningProcs[0].Handle.Process.Pid <= 65536 && runningProcs[0].Handle.Process.Pid > 0) {
+	//			t.Error("Test failed")
 	//Test Xml Read
 	actual := xmlReadIn()
 	if actual != nil {
@@ -20,26 +22,49 @@ func TestError(t *testing.T) {
 	//Test Programm start
 	go programmStart(0) //paint 1. mal
 	time.Sleep(2 * time.Second)
-	if len(runningProcs) != 0 {
-		if !(runningProcs[0].Handle.Process.Pid <= 65536 && runningProcs[0].Handle.Process.Pid > 0) {
-			t.Error("Test failed")
-		}
-		//	err := programmStart(0)
-		//	if err != nil {
-		//		t.Error("Test: Programm start failed")
-		//	}
-		//Test Programm kill
-		programmKill(0) //1. paint killen
-		time.Sleep(2 * time.Second)
-		status := runningProcs[0].Handle.ProcessState.String()
-		if strings.HasPrefix(status, "exit") != true {
-			t.Error("Test: KillingProcessHard failed")
-		}
+	//1.Version
+	if len(runningProcs) == 0 {
+		t.Error("Test: Programm start failed")
 	}
-	//Test Killing Process
-	//	programmStop(0)
 
-	//	fmt.Println(string(runningProcs[0].Handle.Process.Pid))
+	//2. Version
+	// Programm muss manuell beendet werden
+	//	err := programmStart(0)
+	//	time.Sleep(2 * time.Second)
+	//	if err != nil {
+	//		t.Error("Test: Programm start failed")
+	//	}
+
+	//Test Killing Process & Update Process Status
+	programmKill(0) //1. paint killen
+	time.Sleep(2 * time.Second)
+
+	//Update Process Alive
+	updateProcAliveState()
+	if runningProcs[0].Alive != false {
+		t.Error("Test: update Process Status failed")
+	}
+	//Killing Process
+	status := runningProcs[0].Handle.ProcessState.String()
+	if strings.HasPrefix(status, "exit") != true {
+		t.Error("Test: KillingProcess failed")
+	}
+
+	//Test Process Stop
+
+	go programmStart(2) //paint 1. mal
+	time.Sleep(2 * time.Second)
+
+	programmStop(1)
+	status = runningProcs[1].Handle.ProcessState.String()
+	if strings.HasPrefix(status, "exit") != true {
+		t.Error("Test: Process stop failed")
+	}
+
+	programmKill(1) //Keine Spuren hinterlassen
+
+	fmt.Println("Test finished")
+
 	//Test Killing Process Hard UNIX
 	//Nicht unter Windows anwendbar !!!
 	//	fmt.Println(runningProcs[0].Handle.Process.Pid)
