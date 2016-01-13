@@ -2,7 +2,7 @@ package main
 
 import (
     "fmt"
- //   "io"
+    "io"
 	"io/ioutil"
     "log"
     "os"
@@ -29,6 +29,10 @@ type xmlConfig struct {
 	ProgrammStartListe		[]string `xml:"application>start"`
 	ProgrammStopListe		[]string `xml:"application>stop"`
 	ProgrammRestartListe	[]bool `xml:"application>restart"`
+	ProgrammExitListe		[]string `xml:"application>exit"`
+}
+type dummy struct {		//for template execution
+	Wait int
 }
 
 type process struct {
@@ -39,6 +43,8 @@ type process struct {
 	Restart		bool
 	Alive		bool
 	StartCount	int
+	ExitCmd		string
+	StdInPipe	io.WriteCloser
 }
 
 var runningProcs = make([] process,0)		//all ever spawned processes in a struct
@@ -50,7 +56,7 @@ func restartProc(r int){
 		var befehlKomplett string = runningProcs[r].StartCmd
 			befehlSplit :=strings.Split(befehlKomplett," ")	
 			cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
-
+			stdinPipe,_:=cmd.StdinPipe()
 			runningProcs = append(runningProcs, process{cmd,
 										runningProcs[r].Name,
 										runningProcs[r].StopCmd,
@@ -58,18 +64,18 @@ func restartProc(r int){
 										//true})
 										runningProcs[r].Restart,
 										true,
-										runningProcs[r].StartCount+1})		//Restart should be true
+										runningProcs[r].StartCount+1,
+										runningProcs[r].ExitCmd,
+										stdinPipe})		//Restart should be true
 			runningProcs[r].Restart=false			//Beim bisherigen Eintrag Restart deaktivieren
 //mutExRunningProcs.Unlock()
 //runtime.Gosched()
 
-			logFile:=openLogFile("len(runningProcs)")
-
+			logFile:=openLogFile(runningProcs[r].Name)
 			defer logFile.Close()	//sinnvoll?
+			
 			cmd.Stdout=logFile
-			cmd.Run()		//ARGH!""§
-			//cmd.Start()
-			//cmd.Wait()
+			cmd.Run()
 }
 func Download(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "config.xml")
@@ -79,13 +85,13 @@ const backTemplate = `
 <!DOCTYPE html>
 <html>
 <head>
-<meta http-equiv="refresh" content="3; url=./test" />
+{{if .Wait}}<meta http-equiv="refresh" content="{{.Wait}}; url=./test" />{{end}}
 </head>
 <body>
 
 <button onclick="goBack()">Zurück</button>
-
-<p>Befehl wurde ausgeführt! Zurück in 3 Sekunden...</p>
+{{if not .Wait}}<br><br>{{end}}
+{{if .Wait}}<p>Befehl wurde ausgeführt! Zurück in {{.Wait}} Sekunden...</p>{{end}}
 
 <script>
 function goBack() {
@@ -110,17 +116,21 @@ function goBack() {
 	<a href="/download">XML-Datei (Rechtsklick zum Speichern)</a>
 	<h1>Programme starten</h1>
 	
-		{{range $index, $results := .Programme}}<a class="postlink" href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
+		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
 	<h1>Laufende Prozesse hart beenden (SIGKILL)</h1>	
 		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 	<h1>Laufende Prozesse weich beenden (SIGTERM)</h1>	
 		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=term&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Laufende Prozesse mit hinterlegtem Exit-Befehl and STDIN beenden</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=exit&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 	<h1>Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>	
 		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=stop&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 	<h1>Restart-Option laufender Prozesse (de-)aktivieren</h1>
 		{{range $index, $results := .Prozesse}}{{if .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
 	<h1>Restart-Option beendeter Prozesse (de-)aktivieren [revive/dismiss]</h1>
 		{{range $index, $results := .Prozesse}}{{if not .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Logging</h1>
+		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=log&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
 
 	</body>
 </html>`
@@ -186,7 +196,8 @@ func killingProcessSoftly(pid int){
 func openLogFile(progra string)*os.File{
 	// open the out file for writing
 	// logFile, err := os.Create("./logProcSlice"+progra+".txt")
-	logFile, err := os.OpenFile("./log_"+progra+".txt",os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666 )
+	logFile, err := os.OpenFile("./log_"+progra+".txt",os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666 ) //WRITE-ONLY
+	//logFile, err := os.OpenFile("./log_"+progra+".txt",os.O_RDWR|os.O_APPEND|os.O_CREATE, 0777 )
     if err != nil {
         panic(err)
     }
@@ -199,6 +210,7 @@ func programmStart(programmNr int){
 	var befehlKomplett string = v.ProgrammStartListe[programmNr]	
 	befehlSplit :=strings.Split(befehlKomplett," ")	
 	cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
+	stdinPipe,_:=cmd.StdinPipe()
 	//	stdout, err := cmd.StdoutPipe()
 	//    checkError(err)
 	//    stderr, err := cmd.StderrPipe()
@@ -212,7 +224,9 @@ func programmStart(programmNr int){
 					befehlKomplett,
 					v.ProgrammRestartListe[programmNr],
 					true,
-					1})
+					1,
+					v.ProgrammExitListe[programmNr],
+					stdinPipe})
 mutExRunningProcs.Unlock()
 runtime.Gosched()
 	logFile:=openLogFile(v.ProgrammNamenListe[programmNr])
@@ -387,29 +401,50 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 					go programmStart(procNr)		//evtl. goroutine ?!
 					
 					//t.Execute(w)
-					t.Execute(w,v)
+					t.Execute(w,dummy{3})
 					fmt.Fprintln(w, "Programm "+ v.ProgrammNamenListe[procNr] +" wurde gestartet");
 					}else {goto wrongHashOrValue}
 					}
     case "kill":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){
 					go programmKill(procNr)	//routine ja oder nein ?
-					t.Execute(w,v)
+					t.Execute(w,dummy{3})
 					fmt.Fprintf(w,"Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
 					}else {goto wrongHashOrValue}}
 	case "term":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					go programmTerminate(procNr)	//routine ja oder nein ?
-					t.Execute(w,v)
+					t.Execute(w,dummy{3})
 					fmt.Fprintln(w,"Beendigungsanfrage an Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
 					}else {goto wrongHashOrValue}}
     case "stop":	{ if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){			
 					go programmStop(procNr)	//evtl. goroutine!?
-					t.Execute(w,v)
+					t.Execute(w,dummy{3})
 					fmt.Fprintln(w,"Stop-Befehl für "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") wurde gestartet.")
 				    }else {goto wrongHashOrValue}}
 	case "autostart":{	if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){		//toggle Restartoption for running processes, for new processes wins the xml-config!
 					runningProcs[procNr].Restart=!runningProcs[procNr].Restart	//you can also revive dead procs... or vice-versa
-					t.Execute(w,v)
+					t.Execute(w,dummy{3})
 					}else {goto wrongHashOrValue}}
+	case "log":		{if procNr >=0 && procNr <len(v.ProgrammStartListe) && hashProg==hashOfProgrammListe(){
+					t.Execute(w,dummy{})
+					dat, _:=ioutil.ReadFile("log_"+v.ProgrammNamenListe[procNr]+".txt")
+					fmt.Fprint(w,string(dat))
+					//g,_ :=os.Open("log_"+runningProcs[procNr].Name+".txt")
+					//g.Read(b1)
+					//openLogFile(v.ProgrammNamenListe[procNr]).Read(b1)
+					//fmt.Fprint(w, string(b1))
+					
+					//fmt.Fprint(w,"HIER LOG AUSGEBEN")
+					//fmt.Print(w,openLogFile(runningProcs[procNr].Name))
+					//b2 := make([]byte, 200)
+					//openLogFile(v.ProgrammNamenListe[0]).Read(b2)
+					//fmt.Fprint(w,string(b2))
+
+					}else {goto wrongHashOrValue}}
+	case "exit":	{if procNr >=0 && procNr <len(runningProcs) && hashProc==hashOfRunningProcs(){
+					go programmExit(procNr)
+					t.Execute(w,dummy{3})
+					fmt.Fprintln(w,"Exit-Befehl wurde an "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") gesendet.")
+					}}				
 	default: 		{//t.Execute(w,v)
 					fmt.Fprintln(w,"Ungültiger Aufruf! Bitte Seite neu laden und erneut versuchen!")
 	}			//nur wenn aktionskennung falsch, meldung. und meldung, dass befehl ausgeführt worden wäre. dies beides noch ändern
@@ -465,6 +500,7 @@ func programmStop(progra int){
 		befehlKomplett :=runningProcs[progra].StopCmd
 		befehlSplit :=strings.Split(befehlKomplett," ")	
 		cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
+		stdinPipe,_:=cmd.StdinPipe()
 		fmt.Println("STILL ALIVE123")
 	/*	stdout, err := cmd.StdoutPipe()
 	    checkError(err)
@@ -479,7 +515,9 @@ func programmStop(progra int){
 											runningProcs[progra].StopCmd,		//for support of restart process procedure...
 											false,							//Stop-Command usually fired once!
 											true,
-											1})
+											1,
+											runningProcs[progra].ExitCmd,
+											stdinPipe})
 											
 		fmt.Println("KZUUKSTILL ALIVE123")
 		go cmd.Run()		//dann Status erst nach Abschluss des Prozesses routine important for long-lasting tasks!!!
@@ -490,7 +528,33 @@ func programmStop(progra int){
 	mutExRunningProcs.Unlock()
 	runtime.Gosched()
 }
+func programmExit(progra int){
+	mutExRunningProcs.RLock()
+	if progra <len(runningProcs) && progra >= 0{
+		fmt.Println("schreibe gleich"+runningProcs[progra].ExitCmd)
+	//	asdgf:=runningProcs[progra].ExitCmd //+"\n"
+		//asdgf:="mspaint.exe\n"
+		//fmt.Println(asdgf)
+		//runningProcs[progra].StdInPipe.Write([]byte(asdgf+"\n")) //WORKS
+	//			runningProcs[progra].StdInPipe.Write([]byte("mspaint.exe\n")) WORKS
 
+				runningProcs[progra].StdInPipe.Write([]byte(runningProcs[progra].ExitCmd+"\n"))
+
+	//	io.WriteString(runningProcs[progra].StdInPipe,runningProcs[progra].ExitCmd)
+			//	io.WriteString(runningProcs[progra].StdInPipe,"mspaint.exe\n") WORKS
+
+	//	defer cleanProcSlice(progra)
+//	stdinWriter,_ :=runningProcs[progra].Handle.StdinPipe()
+	//stdinWriter.Write([]byte(runningProcs[progra].ExitCmd))
+//	stdinWriter.Write([]byte("^"))
+//	stdinWriter.Close()
+	//	procSlice[progra].Process.Kill()
+	fmt.Printf(runningProcs[progra].Name+" mit PID "+strconv.Itoa(runningProcs[progra].Handle.Process.Pid)+" wurde Exit-Befehl geschickt\n")
+	}
+	mutExRunningProcs.RUnlock()
+	runtime.Gosched()
+}
+	
 func helperRoutinesStarter(){
 var i int = 0			//count helper-runs for firing the lengthCheck
 go watchFile()		//Veränderungen an der XML erkennen, ggfs. neu einlesenr
@@ -559,7 +623,7 @@ func processeAufKonsoleAusgeben(){
 		//	asd := procSlice[k].ProcessState.String()
 		//	asd:=procState.String()
 		if strings.HasPrefix(asd, "exit")==false{ //exit status 0,1,... don't want any of them!
-			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(r)+", "+runningProcs[r].Name+" "+runningProcs[r].StopCmd)
+			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(r)+", "+runningProcs[r].Name+" "+runningProcs[r].StopCmd+runningProcs[r].ExitCmd)
 			//procSliceNotExited = append(procSliceNotExited, strconv.Itoa(k)+", "+procSliceNameAndStopcmd[k])
 		}
 	}
