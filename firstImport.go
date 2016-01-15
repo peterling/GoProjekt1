@@ -108,7 +108,8 @@ func checkForRestart() {
 	mutExRunningProcs.Lock()
 	for r := range runningProcs { //für alle einträge im restartslice
 		if runningProcs[r].Restart == true && runningProcs[r].Alive == false { //wenn restart-switch on für appl, nur dann...
-			go programmStart(r, -2) //ohne GOROUTINE hängt ?!! wegen run/start in restartProc! sonst nicht überwacht wenn start statt run!
+		k:=indexProgrammList(r)
+			go programmStart(k, r) //ohne GOROUTINE hängt ?!! wegen run/start in restartProc! sonst nicht überwacht wenn start statt run!
 		}
 	}
 	mutExRunningProcs.Unlock()
@@ -130,6 +131,7 @@ func programmStart(programmNr int, procID int) {
 	if procID != -2 {
 		befehlKomplett = v.ProgrammStartListe[programmNr]
 	} else {
+		programmNr = indexProgrammList(programmNr)
 		befehlKomplett = v.ProgrammStopListe[programmNr]
 	}
 	befehlSplit := strings.Split(befehlKomplett, " ")
@@ -175,7 +177,7 @@ func programmStart(programmNr int, procID int) {
 		}
 	default: //restart Process
 		{
-			programmNr = indexProgrammList(programmNr)
+//			programmNr = indexProgrammList(programmNr)
 			runningProcs[procID] = process{cmd,
 				runningProcs[procID].Name,
 				runningProcs[procID].StopCmd,
@@ -209,13 +211,19 @@ func programmStart(programmNr int, procID int) {
 	go func() {
 		for scannen.Scan() {
 			fileStat, _ := logFile.Stat()
-			if len(runningProcs[procIndex].LogBuffer) < sliceMaxSize {
+			mutExRunningProcs.Lock()
+			if len(runningProcs) > procIndex {
+			if len(runningProcs[procIndex].LogBuffer) < sliceMaxSize{
 				fmt.Println("Schreiben")
 				runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
 			} else {
 				runningProcs[procIndex].LogBuffer = runningProcs[procIndex].LogBuffer[1:(sliceMaxSize - 2)]
 				runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
+
 			}
+			}
+							mutExRunningProcs.Unlock()
+				runtime.Gosched()
 			//fileStat, _ = logFile.Stat()
 			if fileStat.Size() > logFileMaxSize {
 				os.Truncate("./log_"+v.ProgrammNamenListe[programmNr]+".txt", 0)
@@ -412,7 +420,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	case "autostart":
 		{
 			if procNr >= 0 && procNr < len(runningProcs) && hashProc == hashOfRunningProcs() { //toggle Restartoption for running processes, for new processes wins the xml-config!
-				runningProcs[procNr].Restart = !runningProcs[procNr].Restart //you can also revive dead procs... or vice-versa
+				runningProcs[procNr].Restart = !runningProcs[procNr].Restart //you are able to revive dead procs... or vice-versa
 				t.Execute(w, dummy{3})
 			} else {
 				goto wrongHashOrValue
