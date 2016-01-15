@@ -65,10 +65,10 @@ const runningProcsLengthTreshold int = 10 //maybe 10000
 const runningProcsLengthInterval int = 5  //maybe 1000
 
 func indexProgrammList(r int) int {
-	index := -1
+	index := -1		//dangerous!
 	for k := range v.ProgrammNamenListe {
 
-		if v.ProgrammNamenListe[k] == runningProcs[r].Name {
+		if v.ProgrammNamenListe[k] == runningProcs[r].Name || strings.HasSuffix(runningProcs[r].Name, v.ProgrammNamenListe[k]) {		//for "[STOP] "-Processnames
 			index = k
 		}
 
@@ -126,15 +126,16 @@ func openLogFile(progra string) *os.File {
 	return logFile
 }
 
-func programmStart(programmNr int, option int) { //option -2 = programmstop, -1 = normal start, int = processIndex
+func programmStart(programmNr int, option int) { //option -2 = programmstop (processnr), -1 = normal start (programmnr), +int = processIndex restart (processnr)
 	var befehlKomplett string
 	if option == -1 {
 		befehlKomplett = v.ProgrammStartListe[programmNr]
-	} else if option > 0 {
+	} else if option >= 0 {
 		befehlKomplett = runningProcs[programmNr].StartCmd
 	} else {
-		programmNr = indexProgrammList(programmNr)
-		befehlKomplett = v.ProgrammStopListe[programmNr]
+	//	programmNr = indexProgrammList(programmNr)
+	//	befehlKomplett = v.ProgrammStopListe[programmNr]
+	befehlKomplett = runningProcs[programmNr].StopCmd
 	}
 
 	if befehlKomplett != "" {
@@ -150,19 +151,27 @@ func programmStart(programmNr int, option int) { //option -2 = programmstop, -1 
 		case -2: //Programm Stop
 			{
 				//	programmNr = indexProgrammList(programmNr)
-
+				var stopName string
+				if strings.HasPrefix(runningProcs[programmNr].Name, "[STOP] "){
+					stopName=runningProcs[programmNr].Name
+				}else{
+					stopName= "[STOP] " + runningProcs[programmNr].Name
+				}
+				
+				
 				if programmNr >= 0 {
 					runningProcs = append(runningProcs, process{cmd,
-						"STOP: " + v.ProgrammNamenListe[programmNr],
-						v.ProgrammStopListe[programmNr],
-						v.ProgrammStopListe[programmNr], //for support of restart process procedure...
+						stopName,
+						runningProcs[programmNr].StopCmd,
+						runningProcs[programmNr].StopCmd, //for support of restart process procedure...
 						false, //Stop-Command usually fired once!
 						true,
 						1,
-						v.ProgrammExitListe[programmNr],
+						runningProcs[programmNr].ExitCmd,
 						stdinPipe,
 						cmdAusgabe,
 						logBuffer})
+						programmNr = indexProgrammList(programmNr)
 				}
 			}
 		case -1: //first start
@@ -180,8 +189,8 @@ func programmStart(programmNr int, option int) { //option -2 = programmstop, -1 
 					logBuffer})
 			}
 		default: //restart Process
-			{
-				//				programmNr = indexProgrammList(programmNr)
+			{		//option == programmNr
+								programmNr = indexProgrammList(programmNr)
 				runningProcs[option] = process{cmd,
 					runningProcs[option].Name,
 					runningProcs[option].StopCmd,
@@ -208,6 +217,12 @@ func programmStart(programmNr int, option int) { //option -2 = programmstop, -1 
 		} else {
 			procIndex = 0
 		}
+		
+		if option >= 0{
+			procIndex= option
+		}
+		
+		
 		scannen := bufio.NewScanner(cmdAusgabe)
 		//	pid := runningProcs[procIndex].Handle.Process.Pid
 		logFile.WriteString(time.Now().Format(time.RFC3339) + ": INFO[Instanz gestartet]\n") //CR for friends of Micro$oft Editors
