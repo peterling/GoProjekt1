@@ -1,33 +1,39 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Beim Exit-Befehl bitte keinen abschließenden Zeilenumbruch angeben, dieser wird automatisch ausgeführt! -->
 <applications>
 <application>
-<name>paint</name>
-<start>mspaint.exe</start>
+<name>Paint</name>
+<start>C:\Windows\System32\mspaint.exe</start>
 <stop>ping stopp0.de -4</stop>
 <restart>false</restart>
+<exit>quit</exit>
 </application>
 <application>
-<name>command prompt</name>
+<name>Command Prompt</name>
 <start>cmd.exe</start>
 <stop>ping stopp1.de -4</stop>
 <restart>false</restart>
+<exit>exit</exit>
 </application>
 <application>
-<name>ping auf googleDNS</name>
+<name>PING auf GoogleDNS</name>
 <start>ping 8.8.8.8 -4</start>
 <stop>ping stopDNS.de</stop>
 <restart>false</restart>
+<exit>quit</exit>
 </application>
 <application>
-<name>rechner</name>
+<name>Rechner</name>
 <start>calc.exe</start>
-<stop>ping stopp1.de -4</stop>
+<stop>ping stopp2 -4</stop>
 <restart>false</restart>
+<exit>exit</exit>
 </application>
 <application>
-<name>rechner</name>
-<start>calc.exe</start>
-<stop>ping stopp1.de -4</stop>
+<name>Dauerping auf localhost</name>
+<start>ping google.de -t</start>
+<stop>ping localhost -4 -t</stop>
 <restart>false</restart>
+<exit>terminate</exit>
 </application>
 </applications>
