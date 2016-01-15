@@ -54,8 +54,13 @@ type process struct {
 var runningProcs = make([]process, 0) //all ever spawned processes in a struct
 var runningProcsNew = make([]process, 0)
 var v = xmlConfig{} //the read-in configuration struct
+var runningProcsReorged time.Time = time.Now()
+var programmListeReorged time.Time = time.Now()
+var mutExRunningProcsReorged = &sync.RWMutex{}
+var mutExProgrammListeReorged = &sync.RWMutex{}
+var mutExRunningProcs = &sync.RWMutex{}
 
-//Globale Consanten
+//Globale Konstanten
 const logFileMaxSize = 10000 //maximum file size in bytes for program logging
 const sliceMaxSize = 100
 const configPath string = "config.xml"
@@ -79,65 +84,6 @@ func Download(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, configPath)
 }
 
-const backTemplate = `
-<!DOCTYPE html>
-<html>
-<head>
-{{if .Wait}}<meta http-equiv="refresh" content="{{.Wait}}; url=./" />{{end}}
-</head>
-<body>
-
-<button onclick="goBack()">Zurück</button>
-{{if not .Wait}}<br><br>{{end}}
-{{if .Wait}}<p>Zurück in {{.Wait}} Sekunden...</p>{{end}}
-
-<script>
-function goBack() {
-	window.location.href = "/";
-}
-</script>
-
-</body>
-</html>
-`
-const uebersichtTemplate = `
-	
-<!DOCTYPE html>
-<html>
-	<head>
-		<meta charset="UTF-8">
-		<title>{{.Titel}}</title>
-	</head>
-	<body>
-	<input type="button" value="Seite aktualisieren" onClick="window.location.reload()">
-	<input type="button" value="XML-Datei herunterladen" onClick="window.location.href='/download'">
-	<a href="/download">XML-Datei (Rechtsklick zum Speichern)</a>
-	<h1>Programme starten</h1>
-	
-		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
-	<h1>Laufende Prozesse hart beenden (SIGKILL)</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Laufende Prozesse weich beenden (SIGTERM)</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=term&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Laufende Prozesse mit hinterlegtem Exit-Befehl an STDIN beenden</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=exit&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>	
-		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=stop&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Restart-Option laufender Prozesse (de-)aktivieren</h1>
-		{{range $index, $results := .Prozesse}}{{if .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Restart-Option beendeter Prozesse (de-)aktivieren [revive/dismiss]</h1>
-		{{range $index, $results := .Prozesse}}{{if not .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
-	<h1>Logging</h1>
-		{{range $index, $results := .Prozesse}}<a href="/proccontrol?program={{$index}}&aktion=log&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
-
-	</body>
-</html>`
-
-//	{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog=">{{.}}</a><br>{{end}}{{.StartingLink}}
-//		{{range $index, $results := .Programme}}<a class="postlink" href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}" onClick="window.location.reload();return false;">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
-
-//		{{$p := .ProzessHash}}{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$p}}">{{.}}</a><br>{{end}}{{.StartingLink}}
-//HEAD <meta http-equiv="refresh" content="3" />
 func ObserverHandler(w http.ResponseWriter, r *http.Request) {
 	t := template.Must(template.New("control").Parse(uebersichtTemplate)) // Create a template.
 
@@ -185,24 +131,13 @@ func killingProcessHardUnix(pid int) bool {
 	return false
 }
 
-/*				//ANSATZ ÜBER PID... verworfen... evtl. wieder aufgreifen wenn MAP statt SLICE
-func killingProcessSoftly(pid int){
-	if processRunning(pid){
-	p,_:=	os.FindProcess(pid)
-	p.Signal(os.Interrupt)
-	}
-}*/
-
 func openLogFile(progra string) *os.File {
 	// open the out file for writing
-	// logFile, err := os.Create("./logProcSlice"+progra+".txt")
 	//logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666) //WRITE-ONLY
 	logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
 		panic(err)
 	}
-	//	logFile.WriteString("LogFile created")
-
 	return logFile
 }
 
@@ -240,7 +175,7 @@ func programmStart(programmNr int, procID int) {
 					logBuffer})
 			}
 		}
-	case -1: //Programm start
+	case -1: //first start
 		{
 			runningProcs = append(runningProcs, process{cmd,
 				v.ProgrammNamenListe[programmNr],
@@ -275,8 +210,6 @@ func programmStart(programmNr int, procID int) {
 	mutExRunningProcs.Unlock()
 	runtime.Gosched()
 
-	//cmd.Stdout=wroider
-	//	cmd.Stdout=logFile
 	logFile := openLogFile(v.ProgrammNamenListe[programmNr])
 	defer logFile.Close()
 	var procIndex int
@@ -318,8 +251,6 @@ func programmStart(programmNr int, procID int) {
 	cmd.Run()
 	//defer logFile.Close()	//sinnvoll?
 
-	//	cmd.Run()
-	//	cmd.Start() //??besser?? weil bei start kein processstate abrufbar ?!
 	fmt.Printf(v.ProgrammNamenListe[programmNr] + " wurde gestartet, ") //auf diese ausgabe ist kein verlass (kein real time, erst nach beendigung der funktion)
 	fmt.Printf("PID %d\n", cmd.Process.Pid)
 	//	cmd.Stdout.Write([]byte("\r\n"+time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]"))	//CR for friends of Micro$oft Editors
@@ -334,12 +265,8 @@ func programmStart(programmNr int, procID int) {
 	*/
 }
 
-var mutExRunningProcs = &sync.RWMutex{}
-
-//var mutexStopperProcSlice = &sync.Mutex{}
-
 func runningProcsLengthCheck() {
-	fmt.Println("Lengthcheck started!")
+	fmt.Println("DEBUG: Lengthcheck started!")
 	mutExRunningProcs.Lock()
 	if len(runningProcs) > runningProcsLengthTreshold {
 		mutExRunningProcsReorged.Lock()
@@ -351,16 +278,16 @@ func runningProcsLengthCheck() {
 				runningProcsNew = append(runningProcsNew, runningProcs[r])
 			}
 		}
-		//copy (runningProcsNew, runningProcs)
 		runningProcs = nil
 		for r := range runningProcsNew {
 			runningProcs = append(runningProcs, runningProcsNew[r])
 		}
-		fmt.Println(runningProcsNew)
+	//	fmt.Println(runningProcsNew)
 	}
 	mutExRunningProcs.Unlock()
 	runtime.Gosched()
 }
+
 func xmlReadIn() { //XML-Datei wird eingelesen
 	mutExProgrammListeReorged.Lock()
 	programmListeReorged = time.Now()
@@ -382,7 +309,7 @@ func watchFile() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Datei geprüft!")
+	fmt.Println("DEBUG: Datei geprüft!")
 	stat, err := os.Stat(configPath)
 	if err != nil {
 		return err
@@ -395,11 +322,6 @@ func watchFile() error {
 	}
 	return nil
 }
-
-var runningProcsReorged time.Time = time.Now()
-var programmListeReorged time.Time = time.Now()
-var mutExRunningProcsReorged = &sync.RWMutex{}
-var mutExProgrammListeReorged = &sync.RWMutex{}
 
 func hashOfProgrammListe() string { //Programmliste könnte reorganisiert worden sein -> index verschoben. Daher beim Ausführen über HTTP Hash abgleichen...
 	h := sha1.New() //falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
@@ -542,6 +464,8 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 				go programmExit(procNr)
 				t.Execute(w, dummy{3})
 				fmt.Fprintln(w, "Exit-Befehl wurde an "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") gesendet.")
+			}else {
+				goto wrongHashOrValue
 			}
 		}
 	default:
@@ -571,10 +495,6 @@ func programmTerminate(progra int) {
 	if progra < len(runningProcs) && progra >= 0 {
 		runningProcs[progra].Handle.Process.Signal(os.Interrupt) //signal == readonly ?
 
-		//	procSlice[progra].Process.Signal(os.Interrupt) //no need for syscall. still doesn't work under win-app TODO:CHECK WHY, app-specific?
-		//	procSlice[progra].Process.Signal(syscall.SIGTERM) //doesn't work under win-app TODO:CHECK WHY, app-specific?
-		//	procSlice[progra].Process.Signal(syscall.SIGINT) //doesn't work under win-app TODO:CHECK WHY, app-specific? cmd[cli] OK, calc[gui] NOK
-		//			procSlice[progra].Process.Signal(syscall.SIGKILL)
 		//procSlice[progra].Process.Signal(syscall.Signal(9)) //9=SIGKILL(HARD), 15 = SIGTERM(SOFT)
 
 		fmt.Printf("Beendigungsanfrage an " + runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " gestellt\n")
@@ -592,7 +512,6 @@ func programmKill(progra int) {
 		logFile := openLogFile(runningProcs[progra].Name)
 		defer logFile.Close()
 		logFile.WriteString("KILL-Anforderung gesendet\n")
-		//	procSlice[progra].Process.Kill()
 		fmt.Printf(runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " wurde gekillt\n")
 	}
 	mutExRunningProcs.RUnlock()
@@ -602,23 +521,14 @@ func programmKill(progra int) {
 func programmExit(progra int) {
 	mutExRunningProcs.RLock()
 	if progra < len(runningProcs) && progra >= 0 {
-		fmt.Println("schreibe gleich" + runningProcs[progra].ExitCmd)
-		//asdgf:="mspaint.exe\n"
-		//runningProcs[progra].StdInPipe.Write([]byte(asdgf+"\n")) //WORKS
+	//	fmt.Println("schreibe gleich" + runningProcs[progra].ExitCmd)
 		//			runningProcs[progra].StdInPipe.Write([]byte("mspaint.exe\n")) WORKS
-
 		runningProcs[progra].StdInPipe.Write([]byte(runningProcs[progra].ExitCmd + "\n"))
-
-		//	io.WriteString(runningProcs[progra].StdInPipe,runningProcs[progra].ExitCmd)
-		//	io.WriteString(runningProcs[progra].StdInPipe,"mspaint.exe\n") WORKS
-
 		fmt.Printf(runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " wurde Exit-Befehl geschickt\n")
 	}
 	mutExRunningProcs.RUnlock()
 	runtime.Gosched()
 }
-
-var logcomplete = make([]string, 0)
 
 func helperRoutinesStarter() {
 	var i int = 0 //count helper-runs for firing the lengthCheck
@@ -628,16 +538,12 @@ func helperRoutinesStarter() {
 			panic(err)
 			//			break
 		}
-		//fmt.Println(v)
-		//hashOfRunningProcs()	//placed in runningProcsLengthCheck
-		//hashOfProgrammListe()	//placed in XMLRead
-		fmt.Println("Helper re-run " + strconv.Itoa(i))
-		fmt.Println("Number of goroutines running " + strconv.Itoa(runtime.NumGoroutine()))
+		fmt.Println("DEBUG: Helper re-run # " + strconv.Itoa(i))
+		fmt.Println("DEBUG: Number of concurrent goroutines running at the moment: " + strconv.Itoa(runtime.NumGoroutine()))
 		updateProcAliveState()
 		time.Sleep(300 * time.Millisecond)
-		checkForRestart() //	((HIER MIT GO SONST HÄNGT))
+		checkForRestart()
 		time.Sleep(300 * time.Millisecond)
-		//	fmt.Println(&b)
 
 		processeAufKonsoleAusgeben()
 		if i > runningProcsLengthInterval {
@@ -677,6 +583,64 @@ func processeAufKonsoleAusgeben() {
 	fmt.Print("noch laufende, not-exited processe: ")
 	fmt.Println(procSliceNotExited) //diesen für die website zur anzeige der laufenden prozesse verwenden
 }
+
+//HTML Templates
+const backTemplate = `
+<!DOCTYPE html>
+<html>
+<head>
+{{if .Wait}}<meta http-equiv="refresh" content="{{.Wait}}; url=./" />{{end}}
+</head>
+<body>
+
+<button onclick="goBack()">Zurück</button>
+{{if not .Wait}}<br><br>{{end}}
+{{if .Wait}}<p>Zurück in {{.Wait}} Sekunden...</p>{{end}}
+
+<script>
+function goBack() {
+	window.location.href = "/";
+}
+</script>
+
+</body>
+</html>
+`
+const uebersichtTemplate = `
+	
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>{{.Titel}}</title>
+	</head>
+	<body>
+	<input type="button" value="Seite aktualisieren" onClick="window.location.reload()">
+	<input type="button" value="XML-Datei anzeigen" onClick="window.location.href='/download'">
+	<a href="/download" download="config">XML-Datei herunterladen</a>
+	<h1>Programme starten</h1>
+	
+		{{range $index, $results := .Programme}}<a href="/proccontrol?program={{$index}}&aktion=start&hashprog={{$.ProgrammHash}}">{{.}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
+	<h1>Laufende Prozesse hart beenden (SIGKILL)</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=kill&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Laufende Prozesse weich beenden (SIGTERM)</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=term&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Laufende Prozesse mit hinterlegtem Exit-Befehl an STDIN beenden</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=exit&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>	
+		{{range $index, $results := .Prozesse}}{{if .Alive}}<a href="/proccontrol?program={{$index}}&aktion=stop&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Restart-Option laufender Prozesse (de-)aktivieren</h1>
+		{{range $index, $results := .Prozesse}}{{if .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Restart-Option beendeter Prozesse (de-)aktivieren [revive/dismiss]</h1>
+		{{range $index, $results := .Prozesse}}{{if not .Alive}}{{if .Restart}}<b>{{end}}<a href="/proccontrol?program={{$index}}&aktion=autostart&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}, Autostart: {{.Restart}}, läuft: {{.Alive}}, {{.StartCount}} mal gestartet</a><br>{{if .Restart}}</b>{{end}}{{end}}{{else}}<div><strong>keine überwachten Prozesse</strong></div>{{end}}
+	<h1>Logging</h1>
+		{{range $index, $results := .Prozesse}}<a href="/proccontrol?program={{$index}}&aktion=log&hashproc={{$.ProzessHash}}">{{.Name}}, PID: {{.Handle.Process.Pid}}</a><br>{{else}}<div><strong>keine Programme hinterlegt</strong></div>{{end}}
+
+	</body>
+</html>`
+
+
+
 
 //TODO
 //Fehlerbehandlung
