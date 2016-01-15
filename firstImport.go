@@ -503,7 +503,7 @@ func programmKill(progra int) {
 		runningProcs[progra].Restart = false
 		runningProcs[progra].Handle.Process.Kill()
 		runningProcs[progra].LogBuffer = append(runningProcs[progra].LogBuffer, "KILL-Anforderung gesendet")
-		logFile := openLogFile(runningProcs[progra].Name)
+		logFile := openLogFile(strings.TrimPrefix(runningProcs[progra].Name, "[STOP] "))
 		defer logFile.Close()
 		logFile.WriteString("KILL-Anforderung gesendet\n")
 		fmt.Printf(runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " wurde gekillt\n")
