@@ -8,11 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	//"os/signal"
 	"bufio"
-	//	"syscall"
 	"strings"
-	//"path/filepath"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/xml"
@@ -21,7 +18,6 @@ import (
 	"runtime"
 	"sync"
 	"time"
-	//	"bytes"
 )
 
 type xmlConfig struct {
@@ -119,22 +115,10 @@ func checkForRestart() {
 	runtime.Gosched()
 }
 
-func killingProcessHardUnix(pid int) bool {
-	out, err := exec.Command("kill", "-9", strconv.Itoa(pid)).CombinedOutput()
-	if err != nil {
-		log.Println(err)
-	}
-
-	if string(out) == "" {
-		return true // pid exist
-	}
-	return false
-}
-
 func openLogFile(progra string) *os.File {
 	// open the out file for writing
-	//logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666) //WRITE-ONLY
-	logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0777)
+	logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666) //WRITE-ONLY
+	//logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0777)
 	if err != nil {
 		panic(err)
 	}
@@ -441,18 +425,13 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 				t.Execute(w, dummy{})
 				//dat, _ := ioutil.ReadFile("log_" + v.ProgrammNamenListe[procNr] + ".txt")
 				//fmt.Fprint(w, string(dat))
-				fmt.Fprint(w, runningProcs[procNr].LogBuffer)
+				for r:= range runningProcs[procNr].LogBuffer{
+					fmt.Fprint(w,runningProcs[procNr].LogBuffer[r])
+					fmt.Fprint(w,"<html><br></html>")
+				}
+			//	fmt.Fprint(w, runningProcs[procNr].LogBuffer)
 
-				//g,_ :=os.Open("log_"+runningProcs[procNr].Name+".txt")
-				//g.Read(b1)
-				//openLogFile(v.ProgrammNamenListe[procNr]).Read(b1)
-				//fmt.Fprint(w, string(b1))
 
-				//fmt.Fprint(w,"HIER LOG AUSGEBEN")
-				//fmt.Print(w,openLogFile(runningProcs[procNr].Name))
-				//b2 := make([]byte, 200)
-				//openLogFile(v.ProgrammNamenListe[0]).Read(b2)
-				//fmt.Fprint(w,string(b2))
 
 			} else {
 				goto wrongHashOrValue
