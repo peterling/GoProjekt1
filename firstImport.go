@@ -1,21 +1,21 @@
 package main
 
 import (
-	"fmt"
-	"io"
-	"io/ioutil"
-	"log"
-	"os"
-	"os/exec"
-	"strconv"
 	"bufio"
-	"strings"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/xml"
+	"fmt"
 	"html/template"
+	"io"
+	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -65,7 +65,7 @@ const runningProcsLengthTreshold int = 10 //maybe 10000
 const runningProcsLengthInterval int = 5  //maybe 1000
 
 func indexProgrammList(r int) int {
-	var index int
+	index := -1
 	for k := range v.ProgrammNamenListe {
 
 		if v.ProgrammNamenListe[k] == runningProcs[r].Name {
@@ -73,6 +73,7 @@ func indexProgrammList(r int) int {
 		}
 
 	}
+	fmt.Println("testindex")
 	return index
 }
 
@@ -108,8 +109,7 @@ func checkForRestart() {
 	mutExRunningProcs.Lock()
 	for r := range runningProcs { //für alle einträge im restartslice
 		if runningProcs[r].Restart == true && runningProcs[r].Alive == false { //wenn restart-switch on für appl, nur dann...
-		k:=indexProgrammList(r)
-			go programmStart(k, r) //ohne GOROUTINE hängt ?!! wegen run/start in restartProc! sonst nicht überwacht wenn start statt run!
+			go programmStart(r, r) //ohne GOROUTINE hängt ?!! wegen run/start in restartProc! sonst nicht überwacht wenn start statt run!
 		}
 	}
 	mutExRunningProcs.Unlock()
@@ -126,135 +126,129 @@ func openLogFile(progra string) *os.File {
 	return logFile
 }
 
-func programmStart(programmNr int, procID int) {
+func programmStart(programmNr int, option int) { //option -2 = programmstop, -1 = normal start, int = processIndex
 	var befehlKomplett string
-	if procID != -2 {
+	if option == -1 {
 		befehlKomplett = v.ProgrammStartListe[programmNr]
+	} else if option > 0 {
+		befehlKomplett = runningProcs[programmNr].StartCmd
 	} else {
 		programmNr = indexProgrammList(programmNr)
 		befehlKomplett = v.ProgrammStopListe[programmNr]
 	}
-	befehlSplit := strings.Split(befehlKomplett, " ")
-	cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
-	stdinPipe, _ := cmd.StdinPipe()
 
-	cmdAusgabe, _ := cmd.StdoutPipe()
-	logBuffer := make([]string, 0)
+	if befehlKomplett != "" {
+		befehlSplit := strings.Split(befehlKomplett, " ")
+		cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
+		stdinPipe, _ := cmd.StdinPipe()
 
-	mutExRunningProcs.Lock()
-	switch procID {
-	case -2: //Programm Stop
-		{
-			programmNr = indexProgrammList(programmNr)
+		cmdAusgabe, _ := cmd.StdoutPipe()
+		logBuffer := make([]string, 0)
 
-			if programmNr < len(runningProcs) && programmNr >= 0 {
+		mutExRunningProcs.Lock()
+		switch option {
+		case -2: //Programm Stop
+			{
+				//	programmNr = indexProgrammList(programmNr)
+
+				if programmNr >= 0 {
+					runningProcs = append(runningProcs, process{cmd,
+						"STOP: " + v.ProgrammNamenListe[programmNr],
+						v.ProgrammStopListe[programmNr],
+						v.ProgrammStopListe[programmNr], //for support of restart process procedure...
+						false, //Stop-Command usually fired once!
+						true,
+						1,
+						v.ProgrammExitListe[programmNr],
+						stdinPipe,
+						cmdAusgabe,
+						logBuffer})
+				}
+			}
+		case -1: //first start
+			{
 				runningProcs = append(runningProcs, process{cmd,
-					"STOP: " + runningProcs[programmNr].Name,
-					runningProcs[programmNr].StopCmd,
-					runningProcs[programmNr].StopCmd, //for support of restart process procedure...
-					false, //Stop-Command usually fired once!
+					v.ProgrammNamenListe[programmNr],
+					v.ProgrammStopListe[programmNr],
+					befehlKomplett,
+					v.ProgrammRestartListe[programmNr],
 					true,
 					1,
-					runningProcs[programmNr].ExitCmd,
+					v.ProgrammExitListe[programmNr],
 					stdinPipe,
 					cmdAusgabe,
 					logBuffer})
 			}
-		}
-	case -1: //first start
-		{
-			runningProcs = append(runningProcs, process{cmd,
-				v.ProgrammNamenListe[programmNr],
-				v.ProgrammStopListe[programmNr],
-				befehlKomplett,
-				v.ProgrammRestartListe[programmNr],
-				true,
-				1,
-				v.ProgrammExitListe[programmNr],
-				stdinPipe,
-				cmdAusgabe,
-				logBuffer})
-		}
-	default: //restart Process
-		{
-//			programmNr = indexProgrammList(programmNr)
-			runningProcs[procID] = process{cmd,
-				runningProcs[procID].Name,
-				runningProcs[procID].StopCmd,
-				runningProcs[procID].StartCmd,
-				runningProcs[procID].Restart,
-				true,
-				runningProcs[procID].StartCount + 1,
-				runningProcs[procID].ExitCmd,
-				stdinPipe,
-				cmdAusgabe,
-				runningProcs[procID].LogBuffer}
-		}
-
-	}
-
-	mutExRunningProcs.Unlock()
-	runtime.Gosched()
-
-	logFile := openLogFile(v.ProgrammNamenListe[programmNr])
-	defer logFile.Close()
-	var procIndex int
-	if len(runningProcs) > 0 {
-		procIndex = len(runningProcs) - 1
-	} else {
-		procIndex = 0
-	}
-	scannen := bufio.NewScanner(cmdAusgabe)
-	//	pid := runningProcs[procIndex].Handle.Process.Pid
-	logFile.WriteString(time.Now().Format(time.RFC3339) + ": INFO[Instanz gestartet]\n") //CR for friends of Micro$oft Editors
-	runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]\n")
-	go func() {
-		for scannen.Scan() {
-			fileStat, _ := logFile.Stat()
-			mutExRunningProcs.Lock()
-			if len(runningProcs) > procIndex {
-			if len(runningProcs[procIndex].LogBuffer) < sliceMaxSize{
-				fmt.Println("Schreiben")
-				runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
-			} else {
-				runningProcs[procIndex].LogBuffer = runningProcs[procIndex].LogBuffer[1:(sliceMaxSize - 2)]
-				runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
-
+		default: //restart Process
+			{
+				//				programmNr = indexProgrammList(programmNr)
+				runningProcs[option] = process{cmd,
+					runningProcs[option].Name,
+					runningProcs[option].StopCmd,
+					runningProcs[option].StartCmd,
+					runningProcs[option].Restart,
+					true,
+					runningProcs[option].StartCount + 1,
+					runningProcs[option].ExitCmd,
+					stdinPipe,
+					cmdAusgabe,
+					runningProcs[option].LogBuffer}
 			}
-			}
-							mutExRunningProcs.Unlock()
+
+		}
+
+		mutExRunningProcs.Unlock()
+		runtime.Gosched()
+
+		logFile := openLogFile(v.ProgrammNamenListe[programmNr])
+		defer logFile.Close()
+		var procIndex int
+		if len(runningProcs) > 0 {
+			procIndex = len(runningProcs) - 1
+		} else {
+			procIndex = 0
+		}
+		scannen := bufio.NewScanner(cmdAusgabe)
+		//	pid := runningProcs[procIndex].Handle.Process.Pid
+		logFile.WriteString(time.Now().Format(time.RFC3339) + ": INFO[Instanz gestartet]\n") //CR for friends of Micro$oft Editors
+		runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]\n")
+		go func() {
+			for scannen.Scan() {
+				fileStat, _ := logFile.Stat()
+				mutExRunningProcs.Lock()
+				if len(runningProcs) > procIndex {
+					if len(runningProcs[procIndex].LogBuffer) < sliceMaxSize {
+						fmt.Println("Schreiben")
+						runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
+					} else {
+						runningProcs[procIndex].LogBuffer = runningProcs[procIndex].LogBuffer[1:(sliceMaxSize - 2)]
+						runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
+
+					}
+				}
+				mutExRunningProcs.Unlock()
 				runtime.Gosched()
-			//fileStat, _ = logFile.Stat()
-			if fileStat.Size() > logFileMaxSize {
-				os.Truncate("./log_"+v.ProgrammNamenListe[programmNr]+".txt", 0)
-				//logFile.WriteString(scannen.Text() + "\n")
-				for r := range runningProcs[procIndex].LogBuffer {
-					logFile.Write([]byte(runningProcs[procIndex].LogBuffer[r]))
+				//fileStat, _ = logFile.Stat()
+				if fileStat.Size() > logFileMaxSize {
+					os.Truncate("./log_"+v.ProgrammNamenListe[programmNr]+".txt", 0)
+					//logFile.WriteString(scannen.Text() + "\n")
+					for r := range runningProcs[procIndex].LogBuffer {
+						logFile.Write([]byte(runningProcs[procIndex].LogBuffer[r]))
+
+					}
+				} else {
+					logFile.WriteString(scannen.Text() + "\n")
 
 				}
-			} else {
-				logFile.WriteString(scannen.Text() + "\n")
-
+				fmt.Printf("Ausgabe | %s\n", scannen.Text())
 			}
-			fmt.Printf("Ausgabe | %s\n", scannen.Text())
-		}
-	}()
+		}()
 
-	cmd.Run()
-	//defer logFile.Close()	//sinnvoll?
-
-	fmt.Printf(v.ProgrammNamenListe[programmNr] + " wurde gestartet, ") //auf diese ausgabe ist kein verlass (kein real time, erst nach beendigung der funktion)
-	fmt.Printf("PID %d\n", cmd.Process.Pid)
-	//	cmd.Stdout.Write([]byte("\r\n"+time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]"))	//CR for friends of Micro$oft Editors
-	//	logFile.Sync()		//at this point ?
-	/*
-		writer := bufio.NewWriter(logFile)
-		 defer writer.Flush()
-		stdoutPipe, err := cmd.StdoutPipe()
-		 if err != nil {
-		     panic(err)
-		}
-	*/
+		cmd.Run()
+		fmt.Printf(v.ProgrammNamenListe[programmNr] + " wurde gestartet, ") //auf diese ausgabe ist kein verlass (kein real time, erst nach beendigung der funktion)
+		fmt.Printf("PID %d\n", cmd.Process.Pid)
+		//	cmd.Stdout.Write([]byte("\r\n"+time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]"))	//CR for friends of Micro$oft Editors
+	}
 }
 
 func runningProcsLengthCheck() {
@@ -274,7 +268,7 @@ func runningProcsLengthCheck() {
 		for r := range runningProcsNew {
 			runningProcs = append(runningProcs, runningProcsNew[r])
 		}
-	//	fmt.Println(runningProcsNew)
+		//	fmt.Println(runningProcsNew)
 	}
 	mutExRunningProcs.Unlock()
 	runtime.Gosched()
@@ -433,13 +427,11 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 				t.Execute(w, dummy{})
 				//dat, _ := ioutil.ReadFile("log_" + v.ProgrammNamenListe[procNr] + ".txt")
 				//fmt.Fprint(w, string(dat))
-				for r:= range runningProcs[procNr].LogBuffer{
-					fmt.Fprint(w,runningProcs[procNr].LogBuffer[r])
-					fmt.Fprint(w,"<html><br></html>")
+				for r := range runningProcs[procNr].LogBuffer {
+					fmt.Fprint(w, runningProcs[procNr].LogBuffer[r])
+					fmt.Fprint(w, "<html><br></html>")
 				}
-			//	fmt.Fprint(w, runningProcs[procNr].LogBuffer)
-
-
+				//	fmt.Fprint(w, runningProcs[procNr].LogBuffer)
 
 			} else {
 				goto wrongHashOrValue
@@ -451,7 +443,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 				go programmExit(procNr)
 				t.Execute(w, dummy{3})
 				fmt.Fprintln(w, "Exit-Befehl wurde an "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") gesendet.")
-			}else {
+			} else {
 				goto wrongHashOrValue
 			}
 		}
@@ -508,7 +500,7 @@ func programmKill(progra int) {
 func programmExit(progra int) {
 	mutExRunningProcs.RLock()
 	if progra < len(runningProcs) && progra >= 0 {
-	//	fmt.Println("schreibe gleich" + runningProcs[progra].ExitCmd)
+		//	fmt.Println("schreibe gleich" + runningProcs[progra].ExitCmd)
 		//			runningProcs[progra].StdInPipe.Write([]byte("mspaint.exe\n")) WORKS
 		runningProcs[progra].StdInPipe.Write([]byte(runningProcs[progra].ExitCmd + "\n"))
 		fmt.Printf(runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " wurde Exit-Befehl geschickt\n")
@@ -625,9 +617,6 @@ const uebersichtTemplate = `
 
 	</body>
 </html>`
-
-
-
 
 //TODO
 //Fehlerbehandlung
