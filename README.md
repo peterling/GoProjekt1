@@ -1,4 +1,6 @@
 # GoProjekt1
+Start-URL: https://localhost:4443
+
 Erläuterungen zu Funktionsweisen, um erwartetes Verhalten zu kennen.
 
 Aktuell wird mit dem Reload-Parameter festgelegt, ob ein Programm >nachdem< es ein erstes Mal gestartet wurde, überwacht und bei Beendigung automatisch >neu< gestartet werden soll.
