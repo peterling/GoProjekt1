@@ -81,6 +81,7 @@ func TestError(t *testing.T) {
 	}
 
 	//Test Process Stop
+	//Kein apache vorhanden
 	go programmStart(2, -1) //cmd 1. mal
 	indexProgramm++
 	time.Sleep(2 * time.Second)
@@ -160,14 +161,6 @@ func TestError(t *testing.T) {
 	//		t.Error("Test: Open Logfile failed")
 	//	}
 
-	//Test Killing Process Hard UNIX
-	//Nicht unter Windows anwendbar !!!
-	//	fmt.Println(runningProcs[0].Handle.Process.Pid)
-	//	returnValue := killingProcessHardUnix(runningProcs[0].Handle.Process.Pid)
-
-	//	if returnValue != true {
-	//		t.Error("Test: KillingProcessHard failed")
-	//	}
 
 	//	handler := new(ObserverHandler)
 	//	recorder := httptest.NewRecorder()
