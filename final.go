@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	//"de/vorlesung/projekt/a04"
 )
 
 type xmlConfig struct { //these parameters are read from the xml configuration file
@@ -444,7 +445,7 @@ func webServer() { //served by different handlers depending on the given url
 	http.HandleFunc("/download", Download)       //serve xml configuration file to browser
 	http.HandleFunc("/", ObserverHandler)        //main handler
 	http.HandleFunc("/proccontrol", ProcControl) //processControl, handles all tasks
-	err := http.ListenAndServe(":8000", nil)
+	err := http.ListenAndServeTLS(":4443", "cert.pem", "key.pem", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
