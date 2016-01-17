@@ -11,8 +11,6 @@ Durch eine Änderung der XML-Datei kann sich die Reihenfolge der Programme oder 
 Da die Prozessliste gelegentlich reorganisiert wird, wird beim Zugriff auf Prozesse überprüft, ob die Indizes client- und serverseitig identisch sind (hash über timestamp der Erstellung der Liste). Andernfalls könnte "der falsche" Prozess bearbeitet werden.
 Dasselbe gilt für die Programmliste, die nach Änderungen der XML-Datei ebenfalls neu generiert wird.
 
-//TODO: Meldung, wenn Hashes sich unterscheiden.
-
 Der URL-Parameter kann sowohl die Prozess- als auch die Programmnummer beschreiben (kontextabhängig).
 
 Die Anzahl der Starts gilt pro Prozess und bleibt auch nach Deaktivierung (und ggfs. erneuter Aktivierung) der Autostart-Funktion erhalten.
