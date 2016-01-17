@@ -20,51 +20,50 @@ import (
 	"time"
 )
 
-type xmlConfig struct {
+type xmlConfig struct {				//these parameters are read from the xml configuration file
 	XMLName              xml.Name `xml:"applications"`
-	ProgrammNamenListe   []string `xml:"application>name"`
-	ProgrammStartListe   []string `xml:"application>start"`
-	ProgrammStopListe    []string `xml:"application>stop"`
-	ProgrammRestartListe []bool   `xml:"application>restart"`
-	ProgrammExitListe    []string `xml:"application>exit"`
+	ProgrammNamenListe   []string `xml:"application>name"`		//indexed list of all configured program names
+	ProgrammStartListe   []string `xml:"application>start"`		//indexed list of the corresponding start commands
+	ProgrammStopListe    []string `xml:"application>stop"`		//indexed list of the corresponding stop commands
+	ProgrammRestartListe []bool   `xml:"application>restart"`	//indexed list of automatic restart configuration
+	ProgrammExitListe    []string `xml:"application>exit"`		//indexed list of commands that are sent to the program's STDIN
 }
 type dummy struct { //for template execution
-	Wait int
+	Wait int													//waiting time in seconds before redirection to the main page
 }
 
 type process struct {
-	Handle     *exec.Cmd
-	Name       string
-	StopCmd    string
-	StartCmd   string
-	Restart    bool
-	Alive      bool
-	StartCount int
-	ExitCmd    string
-	StdInPipe  io.WriteCloser
-	StdOutPipe io.ReadCloser
-	LogBuffer  []string
+	Handle     *exec.Cmd			//unique handle of the process
+	Name       string				//name of the program that is executed, identifier
+	StopCmd    string				//stopcommand with its arguments, trying to end process by starting another command
+	StartCmd   string				//startcommand with its arguments
+	Restart    bool					//whether the automatic restart option is activated or not
+	Alive      bool					//has the process already been exited ?
+	StartCount int					//how often has the program been started in this session ?
+	ExitCmd    string				//this string can be sent to the STDIN of the process
+	StdInPipe  io.WriteCloser		//pipe to the STDIN of the process
+	StdOutPipe io.ReadCloser		//pipe from STDOUT
+	LogBuffer  []string				//for keeping some logging entries
 }
 
 //Globale Variablen
-var runningProcs = make([]process, 0) //all ever spawned processes in a struct
-var runningProcsNew = make([]process, 0)
-var v = xmlConfig{} //the read-in configuration struct
-var runningProcsReorged time.Time = time.Now()
-var programmListeReorged time.Time = time.Now()
-var mutExRunningProcsReorged = &sync.RWMutex{}
-var mutExProgrammListeReorged = &sync.RWMutex{}
-var mutExRunningProcs = &sync.RWMutex{}
+var runningProcs = make([]process, 0) 				//all ever spawned child processes (since start of session, will be cleaned up from time to time)
+var runningProcsNew = make([]process, 0)			//temporary slice for copying while reorganisation
+var v = xmlConfig{} 								//the read-in configuration struct
+var runningProcsReorged time.Time = time.Now()		//timestamp of when the processList has been reorganized
+var programmListeReorged time.Time = time.Now()		//timestamp of when the programmList has been reorganized
+var mutExRunningProcsReorged = &sync.RWMutex{}		//mutual exclusion lock for accessing the runningProcessesReorgTimestamp
+var mutExProgrammListeReorged = &sync.RWMutex{}		//mutual exclusion lock for accessing the programListReorgTimestamp
+var mutExRunningProcs = &sync.RWMutex{}				//mutual exclusion lock for accessing the runningProcessesList
 
 //Globale Konstanten
-const logFileMaxSize = 10000 //maximum file size in bytes for program logging
-const sliceMaxSize = 100
-const configPath string = "config.xml"
-const programmAuswahl int = 1             //wählen, welches Programm gestartet werden soll - IRL vom HTTPHandler
-const runningProcsLengthTreshold int = 10 //maybe 10000
-const runningProcsLengthInterval int = 5  //maybe 1000
+const logFileMaxSize = 10000 	//maximum file size in bytes for program logging to files
+const sliceMaxSize = 100		//how many entries are allowed in the temporary slice-based logging
+const configPath string = "config.xml"	//where is the xml configuration file located ?
+const runningProcsLengthTreshold int = 1000 //after the runningProcessesList exceeds X entries, it is reorganized for performance reasons
+const runningProcsLengthInterval int = 300  //how often the length of the runningProcessesList is checked for its length
 
-func indexProgrammList(r int) int {
+func indexProgrammList(r int) int {		//get the programListeEntry from a given processNr
 	index := -1		//dangerous!
 	for k := range v.ProgrammNamenListe {
 
@@ -73,16 +72,15 @@ func indexProgrammList(r int) int {
 		}
 
 	}
-	fmt.Println("testindex")
 	return index
 }
 
-func Download(w http.ResponseWriter, r *http.Request) {
+func Download(w http.ResponseWriter, r *http.Request) {		//function for download of the configuration file
 	http.ServeFile(w, r, configPath)
 }
 
-func ObserverHandler(w http.ResponseWriter, r *http.Request) {
-	t := template.Must(template.New("control").Parse(uebersichtTemplate)) // Create a template.
+func ObserverHandler(w http.ResponseWriter, r *http.Request) {			//main http handler for webGUI
+	t := template.Must(template.New("control").Parse(uebersichtTemplate)) //take our main template and parse it
 
 	data := struct {
 		Titel        string
@@ -96,85 +94,75 @@ func ObserverHandler(w http.ResponseWriter, r *http.Request) {
 		Prozesse:     runningProcs,
 		ProgrammHash: hashOfProgrammListe(),
 		ProzessHash:  hashOfRunningProcs(),
-		/*[]string{
-			"Programm1",
-			"Programm2",
-		},*/
 	}
-
 	t.Execute(w, data)
 }
 
-func checkForRestart() {
-	mutExRunningProcs.Lock()
-	for r := range runningProcs { //für alle einträge im restartslice
-		if runningProcs[r].Restart == true && runningProcs[r].Alive == false { //wenn restart-switch on für appl, nur dann...
-			go programmStart(r, r) //ohne GOROUTINE hängt ?!! wegen run/start in restartProc! sonst nicht überwacht wenn start statt run!
+func checkForRestart() {								//are there any exited processes that need to be restarted ?
+	mutExRunningProcs.Lock()							//try not to interfere with other routines
+	for r := range runningProcs {
+		if runningProcs[r].Restart == true && runningProcs[r].Alive == false {
+			go programmStart(r, r)
 		}
 	}
 	mutExRunningProcs.Unlock()
 	runtime.Gosched()
 }
 
-func openLogFile(progra string) *os.File {
-	// open the out file for writing
-	logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666) //WRITE-ONLY
-	//logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0777)
+func openLogFile(progra string) *os.File {			//open log files for writing persistent logging to disk (observer itself could crash)
+	logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)	//WRITE-ONLY is sufficient
+	//logFile, err := os.OpenFile("./log_"+progra+".txt", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0777)	//testing purposes
 	if err != nil {
 		panic(err)
 	}
-	return logFile
+	return logFile		//for every program there is *one* logging file that is limited in size
 }
 
 func programmStart(programmNr int, option int) { //option -2 = programmstop (processnr), -1 = normal start (programmnr), +int = processIndex restart (processnr)
-	var befehlKomplett string
-	if option == -1 {
-		befehlKomplett = v.ProgrammStartListe[programmNr]
+	var befehlKomplett string					//dependent on the option int, we start a new process, execute a stop command or restart an exited process.
+	if option == -1 {							//the interpretation of programmNr depens on the chosen option! programmNr can also refer to a runningProcessesListIndex
+		befehlKomplett = v.ProgrammStartListe[programmNr]	//whole start command including arguments and parameters from programmListe
 	} else if option >= 0 {
-		befehlKomplett = runningProcs[programmNr].StartCmd
+		befehlKomplett = runningProcs[programmNr].StartCmd	//...from the process that has to be restarted
 	} else {
-	//	programmNr = indexProgrammList(programmNr)
-	//	befehlKomplett = v.ProgrammStopListe[programmNr]
-	befehlKomplett = runningProcs[programmNr].StopCmd
+	befehlKomplett = runningProcs[programmNr].StopCmd		//...from the StopCommandEntry of the running process in order to stop the program.
 	}
 
 	if befehlKomplett != "" {
-		befehlSplit := strings.Split(befehlKomplett, " ")
+		befehlSplit := strings.Split(befehlKomplett, " ")	//the command entry is a single string, containing the command, its arguments and parameters, separated by commata
 		cmd := exec.Command(befehlSplit[0], befehlSplit[1:]...)
-		stdinPipe, _ := cmd.StdinPipe()
+		stdinPipe, _ := cmd.StdinPipe()			//pipe the processes' STDIN for later use
+		cmdAusgabe, _ := cmd.StdoutPipe()		//pipe the processes' STDOUT for later use, it is also possible to redirect the STDERR, too
+		logBuffer := make([]string, 0)			//create a slice for logging entries
 
-		cmdAusgabe, _ := cmd.StdoutPipe()
-		logBuffer := make([]string, 0)
-
-		mutExRunningProcs.Lock()
+		mutExRunningProcs.Lock()				//co-op, team!
 		switch option {
-		case -2: //Programm Stop
+		case -2: 								//we chose to stop a process, so run its STOP-Command
 			{
-				//	programmNr = indexProgrammList(programmNr)
 				var stopName string
-				if strings.HasPrefix(runningProcs[programmNr].Name, "[STOP] "){
+				if strings.HasPrefix(runningProcs[programmNr].Name, "[STOP] "){		//user could have tried to stop a stopping process...
 					stopName=runningProcs[programmNr].Name
 				}else{
-					stopName= "[STOP] " + runningProcs[programmNr].Name
+					stopName= "[STOP] " + runningProcs[programmNr].Name				//mark it with the [STOP]-Prefix for quick recognition
 				}
 				
 				
 				if programmNr >= 0 {
 					runningProcs = append(runningProcs, process{cmd,
 						stopName,
-						runningProcs[programmNr].StopCmd,
-						runningProcs[programmNr].StopCmd, //for support of restart process procedure...
-						false, //Stop-Command usually fired once!
-						true,
-						1,
-						runningProcs[programmNr].ExitCmd,
-						stdinPipe,
-						cmdAusgabe,
-						logBuffer})
-						programmNr = indexProgrammList(programmNr)
+						runningProcs[programmNr].StopCmd,						//when you try to restart a stopping-process, you probably want to give a second try *to stop*
+						runningProcs[programmNr].StopCmd, 						//for support of restart process procedure...
+						false, 													//Stop-Command usually fired once!
+						true,													//usually it should run
+						1,														//first try of stopping
+						runningProcs[programmNr].ExitCmd,						//take it from the existing process, for new entries it could have been changed in config...
+						stdinPipe,												//so we can speak to the process...
+						cmdAusgabe,												//...and also listen to it
+						logBuffer})												//log what happens
+						programmNr = indexProgrammList(programmNr)				//programmNr was the Index of runningProcessList but ahead we need the programListIndex!
 				}
 			}
-		case -1: //first start
+		case -1: 																//first/normal start
 			{
 				runningProcs = append(runningProcs, process{cmd,
 					v.ProgrammNamenListe[programmNr],
@@ -188,68 +176,62 @@ func programmStart(programmNr int, option int) { //option -2 = programmstop (pro
 					cmdAusgabe,
 					logBuffer})
 			}
-		default: //restart Process
-			{		//option == programmNr
-								programmNr = indexProgrammList(programmNr)
+		default: 																//restart Process, usually option == programmNr
+			{
+				programmNr = indexProgrammList(programmNr)
 				runningProcs[option] = process{cmd,
 					runningProcs[option].Name,
 					runningProcs[option].StopCmd,
 					runningProcs[option].StartCmd,
 					runningProcs[option].Restart,
 					true,
-					runningProcs[option].StartCount + 1,
+					runningProcs[option].StartCount + 1,						//increment the start count
 					runningProcs[option].ExitCmd,
 					stdinPipe,
 					cmdAusgabe,
 					runningProcs[option].LogBuffer}
 			}
-
 		}
 
-		mutExRunningProcs.Unlock()
-		runtime.Gosched()
+		mutExRunningProcs.Unlock()												//cope with others
+		runtime.Gosched()														//share
 
-		logFile := openLogFile(v.ProgrammNamenListe[programmNr])
-		defer logFile.Close()
-		var procIndex int
+		logFile := openLogFile(v.ProgrammNamenListe[programmNr])				//logging to disk
+		defer logFile.Close()													//close the file, whatever happens
+		var procIndex int														//where in the processList are we?
 		if len(runningProcs) > 0 {
-			procIndex = len(runningProcs) - 1
+			procIndex = len(runningProcs) - 1									//the last appended process
 		} else {
-			procIndex = 0
+			procIndex = 0														//first entry (right after start or reorganisation)
 		}
 		
-		if option >= 0{
+		if option >= 0{															//take the old slot when restarting
 			procIndex= option
 		}
 		
 		
-		scannen := bufio.NewScanner(cmdAusgabe)
-		//	pid := runningProcs[procIndex].Handle.Process.Pid
-		logFile.WriteString(time.Now().Format(time.RFC3339) + ": INFO[Instanz gestartet]\n") //CR for friends of Micro$oft Editors
-		runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]\n")
+		scannen := bufio.NewScanner(cmdAusgabe)									//scanner for log output
+		logFile.WriteString(time.Now().Format(time.RFC3339) + ": INFO[Instanz gestartet]\n")	//create a logging entry on processStart in file...
+		runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]\n")	//...and in slice
 		go func() {
-			for scannen.Scan() {
-				fileStat, _ := logFile.Stat()
+			for scannen.Scan() {												//let the scanner run and wait for stdout-outputs
+				fileStat, _ := logFile.Stat()									//properties of logfile
 				mutExRunningProcs.Lock()
-				if len(runningProcs) > procIndex {
-					if len(runningProcs[procIndex].LogBuffer) < sliceMaxSize {
-						fmt.Println("Schreiben")
+				if len(runningProcs) > procIndex {								//otherwise it would be out of range
+					if len(runningProcs[procIndex].LogBuffer) < sliceMaxSize {	//we have space left
 						runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
 					} else {
-						runningProcs[procIndex].LogBuffer = runningProcs[procIndex].LogBuffer[1:(sliceMaxSize - 2)]
+						runningProcs[procIndex].LogBuffer = runningProcs[procIndex].LogBuffer[1:(sliceMaxSize - 2)]			//simulate a ring buffer
 						runningProcs[procIndex].LogBuffer = append(runningProcs[procIndex].LogBuffer, scannen.Text()+"\n")
 
 					}
 				}
 				mutExRunningProcs.Unlock()
 				runtime.Gosched()
-				//fileStat, _ = logFile.Stat()
-				if fileStat.Size() > logFileMaxSize {
-					os.Truncate("./log_"+v.ProgrammNamenListe[programmNr]+".txt", 0)
-					//logFile.WriteString(scannen.Text() + "\n")
+				if fileStat.Size() > logFileMaxSize {					//is the file size limit for logging to disk exceeded ?
+					os.Truncate("./log_"+v.ProgrammNamenListe[programmNr]+".txt", 0)	//if so, empty it
 					for r := range runningProcs[procIndex].LogBuffer {
-						logFile.Write([]byte(runningProcs[procIndex].LogBuffer[r]))
-
+						logFile.Write([]byte(runningProcs[procIndex].LogBuffer[r]))		//and fill it with the logs we already have in ram
 					}
 				} else {
 					logFile.WriteString(scannen.Text() + "\n")
@@ -258,46 +240,42 @@ func programmStart(programmNr int, option int) { //option -2 = programmstop (pro
 				fmt.Printf("Ausgabe | %s\n", scannen.Text())
 			}
 		}()
-
-		cmd.Run()
-		fmt.Printf(v.ProgrammNamenListe[programmNr] + " wurde gestartet, ") //auf diese ausgabe ist kein verlass (kein real time, erst nach beendigung der funktion)
+		cmd.Run()																//execute the command
+		fmt.Printf(v.ProgrammNamenListe[programmNr] + " wurde gestartet, ")
 		fmt.Printf("PID %d\n", cmd.Process.Pid)
-		//	cmd.Stdout.Write([]byte("\r\n"+time.Now().Format(time.RFC3339)+": INFO[Instanz gestartet]"))	//CR for friends of Micro$oft Editors
 	}
 }
 
-func runningProcsLengthCheck() {
+func runningProcsLengthCheck() {		//periodically check the slice's length
 	fmt.Println("DEBUG: Lengthcheck started!")
 	mutExRunningProcs.Lock()
 	if len(runningProcs) > runningProcsLengthTreshold {
 		mutExRunningProcsReorged.Lock()
-		runningProcsReorged = time.Now()
+		runningProcsReorged = time.Now()	//others have to know if the list has been reorganized. indexes probably have changed!
 		mutExRunningProcsReorged.Unlock()
 		runningProcsNew = nil
 		for r := range runningProcs {
-			if runningProcs[r].Alive == true || runningProcs[r].Restart == true {
-				runningProcsNew = append(runningProcsNew, runningProcs[r])
+			if runningProcs[r].Alive == true || runningProcs[r].Restart == true {	//the others are exited and don't matter much to us
+				runningProcsNew = append(runningProcsNew, runningProcs[r])			//copy those we still want in our new, cleaned list
 			}
 		}
 		runningProcs = nil
 		for r := range runningProcsNew {
-			runningProcs = append(runningProcs, runningProcsNew[r])
+			runningProcs = append(runningProcs, runningProcsNew[r])					//copy them back
 		}
-		//	fmt.Println(runningProcsNew)
 	}
 	mutExRunningProcs.Unlock()
 	runtime.Gosched()
 }
 
-func xmlReadIn() { //XML-Datei wird eingelesen
+func xmlReadIn() { 								//read in XML configuration file
 	mutExProgrammListeReorged.Lock()
-	programmListeReorged = time.Now()
+	programmListeReorged = time.Now()			//memorize when the last read-in took place
 	mutExProgrammListeReorged.Unlock()
 	runtime.Gosched()
-	hashOfProgrammListe()
-	xmlContent, _ := ioutil.ReadFile(configPath)
-	//err:= xml.Unmarshal(nil, &v)		//bei Neu-Einlesen soll nicht appendet werden
-	v = xmlConfig{} //leeren, damit nicht appendet wird bei Neu-Einlesen
+	hashOfProgrammListe()						//a hash is more comfy to submit than a plain timestamp
+	xmlContent, _ := ioutil.ReadFile(configPath)//open the whole file
+	v = xmlConfig{} 							//empty it before we read another time
 	err := xml.Unmarshal(xmlContent, &v)
 	if err != nil {
 		fmt.Printf("error: %v", err)
@@ -305,7 +283,7 @@ func xmlReadIn() { //XML-Datei wird eingelesen
 	}
 }
 
-func watchFile() error {
+func watchFile() error {						//check if the config file has changed
 	initialStat, err := os.Stat(configPath)
 	if err != nil {
 		return err
@@ -316,7 +294,7 @@ func watchFile() error {
 		return err
 	}
 
-	if stat.Size() != initialStat.Size() || stat.ModTime() != initialStat.ModTime() {
+	if stat.Size() != initialStat.Size() || stat.ModTime() != initialStat.ModTime() {	//do size or modification date differ ?
 		xmlReadIn()
 		log.Println("Datei neu eingelesen, da verändert")
 		initialStat, err = os.Stat(configPath)
@@ -324,54 +302,47 @@ func watchFile() error {
 	return nil
 }
 
-func hashOfProgrammListe() string { //Programmliste könnte reorganisiert worden sein -> index verschoben. Daher beim Ausführen über HTTP Hash abgleichen...
-	h := sha1.New() //falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
+func hashOfProgrammListe() string { 	//client and server should have the same version of the programmListe, so that they refer to the same element!
+	h := sha1.New() 					//if versions differ (because of xml configuration changes), the wrong commands could be executed
 	mutExProgrammListeReorged.RLock()
-
 	h.Write([]byte(programmListeReorged.String()))
-
 	mutExProgrammListeReorged.RUnlock()
 	runtime.Gosched()
 	bs := h.Sum(nil)
 	fmt.Printf("ProgrammListe: %x\n", bs)
-	return hex.EncodeToString(bs)
+	return hex.EncodeToString(bs)		//otherwise hex-encoded. for better human readability
 }
 
-func hashOfRunningProcs() string { //runningProcsListe könnte reorganisiert worden sein -> index verschoben. Daher beim Ausführen über HTTP Hash abgleichen...
-	h := sha1.New() //falls anderer Hash --> Anfrage verwerfen, Seite neu generieren
+func hashOfRunningProcs() string {		 //client and server should have the same version of the processListe, so that they refer to the same element!
+	h := sha1.New() 					//if versions differ (because of runningProcsList reorganisation), the wrong process could be stopped/killed/...
 	mutExRunningProcsReorged.RLock()
-
 	h.Write([]byte(runningProcsReorged.String()))
-
 	mutExRunningProcsReorged.RUnlock()
 	runtime.Gosched()
 	bs := h.Sum(nil)
 
 	fmt.Printf("RunningProcs: %x\n", bs)
-	return hex.EncodeToString(bs)
+	return hex.EncodeToString(bs)		//otherwise hex-encoded. for better human readability
 }
 
 func main() {
-	//Programminitialisierung
-	xmlReadIn()                //XML-Datei einlesen lassen
-	go helperRoutinesStarter() //runs in the background for important tasks
-	//go programFlow()	//Aufrufe in Goroutine starten, später HTTP, jetzt hardcoded
-	webServer() //Webserver, you have control!
-	//hier adden!
-
-	//	fmt.Scanln() //Programm weiterlaufen lassen ohne Ende //endpoint
+	//mandatory steps to get the program up and running...
+	xmlReadIn()                //read in the configured applications and commands
+	go helperRoutinesStarter() //runs important tasks in the background
+	webServer() 				//Webserver, you have control!
+	//here you could add additional tasks!
 }
 
 func ProcControl(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()       // parse arguments, you have to call this by yourself
-	fmt.Println(r.Form) // print form information in server side
+	r.ParseForm()       // parse http arguments
+	//fmt.Println(r.Form) // print form information to console
 	for k, v := range r.Form {
 		fmt.Println("key:", k)
 		fmt.Println("val:", strings.Join(v, ""))
 	}
 
-	welchesProgramm := strings.Join(r.Form["program"], "")
-	wasTun := strings.Join(r.Form["aktion"], "")
+	welchesProgramm := strings.Join(r.Form["program"], "")	//can refer to a programmListeIndex or runningProcessesListIndex, depending on context
+	wasTun := strings.Join(r.Form["aktion"], "")			//which function should be used
 	hashProc := strings.Join(r.Form["hashproc"], "") //hash für Versionsabgleich der Listen(Processe)
 	hashProg := strings.Join(r.Form["hashprog"], "") //hash für Versionsabgleich der Listen(Programme)
 	procNr, _ := strconv.Atoi(welchesProgramm)
@@ -381,15 +352,13 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 		goto wrongHashOrValue
 	}
 
-	switch wasTun { //same identifier procNr for ProgrammID and ProcID...
+	switch wasTun { //same identifier procNr used for either ProgrammID or ProcID...
 	case "start":
 		{
 			if procNr >= 0 && procNr < len(v.ProgrammStartListe) && hashProg == hashOfProgrammListe() {
 
-				go programmStart(procNr, -1) //evtl. goroutine ?!
-
-				//t.Execute(w)
-				t.Execute(w, dummy{3})
+				go programmStart(procNr, -1)
+				t.Execute(w, dummy{3})		//show result and go back to main page after 3 seconds
 				fmt.Fprintln(w, "Programm "+v.ProgrammNamenListe[procNr]+" wurde gestartet")
 			} else {
 				goto wrongHashOrValue
@@ -398,8 +367,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	case "kill":
 		{
 			if procNr >= 0 && procNr < len(runningProcs) && hashProc == hashOfRunningProcs() {
-				go programmKill(procNr) //routine ja oder nein ?
-
+				go programmKill(procNr)
 				t.Execute(w, dummy{3})
 				fmt.Fprintf(w, "Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde hart beendet (SIGKILL/9).")
 			} else {
@@ -409,7 +377,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	case "term":
 		{
 			if procNr >= 0 && procNr < len(runningProcs) && hashProc == hashOfRunningProcs() {
-				go programmTerminate(procNr) //routine ja oder nein ?
+				go programmTerminate(procNr)
 				t.Execute(w, dummy{3})
 				fmt.Fprintln(w, "Beendigungsanfrage an Prozess "+welchesProgramm+" ("+runningProcs[procNr].Name+") wurde gesendet (SIGTERM/15). [ONLY NON-WINDOWS!]")
 			} else {
@@ -419,7 +387,7 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	case "stop":
 		{
 			if procNr >= 0 && procNr < len(runningProcs) && hashProc == hashOfRunningProcs() {
-				go programmStart(procNr, -2) //evtl. goroutine!?
+				go programmStart(procNr, -2)
 				t.Execute(w, dummy{3})
 				fmt.Fprintln(w, "Stop-Befehl für "+runningProcs[procNr].Name+" (Prozess "+welchesProgramm+") wurde gestartet.")
 			} else {
@@ -428,8 +396,8 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 		}
 	case "autostart":
 		{
-			if procNr >= 0 && procNr < len(runningProcs) && hashProc == hashOfRunningProcs() { //toggle Restartoption for running processes, for new processes wins the xml-config!
-				runningProcs[procNr].Restart = !runningProcs[procNr].Restart //you are able to revive dead procs... or vice-versa
+			if procNr >= 0 && procNr < len(runningProcs) && hashProc == hashOfRunningProcs() { //toggle restart option for running processes, for new processes the xml-config wins!
+				runningProcs[procNr].Restart = !runningProcs[procNr].Restart //you are able to revive dead procs... or deactivate the autostart feature if it was set
 				t.Execute(w, dummy{3})
 			} else {
 				goto wrongHashOrValue
@@ -438,16 +406,11 @@ func ProcControl(w http.ResponseWriter, r *http.Request) {
 	case "log":
 		{
 			if procNr >= 0 && procNr < len(runningProcs) && hashProc == hashOfRunningProcs() {
-
 				t.Execute(w, dummy{})
-				//dat, _ := ioutil.ReadFile("log_" + v.ProgrammNamenListe[procNr] + ".txt")
-				//fmt.Fprint(w, string(dat))
 				for r := range runningProcs[procNr].LogBuffer {
 					fmt.Fprint(w, runningProcs[procNr].LogBuffer[r])
-					fmt.Fprint(w, "<html><br></html>")
+					fmt.Fprint(w, "<html><br></html>")		//html-encoded newline after each log entry (output-encoding could be changed for some special characters...)
 				}
-				//	fmt.Fprint(w, runningProcs[procNr].LogBuffer)
-
 			} else {
 				goto wrongHashOrValue
 			}
@@ -474,63 +437,57 @@ wrongHashOrValue:
 	fmt.Fprintln(w, "Falscher Aufruf oder Hash ungültig! Bitte zurück, Seite neu laden und erneut versuchen!")
 }
 
-func webServer() {
-	http.HandleFunc("/download", Download)
-	http.HandleFunc("/", ObserverHandler)
-	http.HandleFunc("/proccontrol", ProcControl)
+func webServer() {									//served by different handlers depending on the given url
+	http.HandleFunc("/download", Download)			//serve xml configuration file to browser
+	http.HandleFunc("/", ObserverHandler)			//main handler
+	http.HandleFunc("/proccontrol", ProcControl)	//processControl, handles all tasks
 	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
 }
 
-func programmTerminate(progra int) {
+func programmTerminate(processNr int) {
 	mutExRunningProcs.RLock()
-	if progra < len(runningProcs) && progra >= 0 {
-		runningProcs[progra].Handle.Process.Signal(os.Interrupt) //signal == readonly ?
-
-		//procSlice[progra].Process.Signal(syscall.Signal(9)) //9=SIGKILL(HARD), 15 = SIGTERM(SOFT)
-
-		fmt.Printf("Beendigungsanfrage an " + runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " gestellt\n")
+	if processNr < len(runningProcs) && processNr >= 0 {
+		runningProcs[processNr].Handle.Process.Signal(os.Interrupt)		//send an signal to terminate from the os
+		fmt.Printf("Beendigungsanfrage an " + runningProcs[processNr].Name + " mit PID " + strconv.Itoa(runningProcs[processNr].Handle.Process.Pid) + " gestellt\n")
 	}
 	mutExRunningProcs.RUnlock()
 	runtime.Gosched()
 }
 
-func programmKill(progra int) {
-	mutExRunningProcs.RLock()
-	if progra < len(runningProcs) && progra >= 0 {
-		runningProcs[progra].Restart = false
-		runningProcs[progra].Handle.Process.Kill()
-		runningProcs[progra].LogBuffer = append(runningProcs[progra].LogBuffer, "KILL-Anforderung gesendet")
-		logFile := openLogFile(strings.TrimPrefix(runningProcs[progra].Name, "[STOP] "))
+func programmKill(processNr int) {					//immediately kill a process and therefore write a log entry so that the reason for that can be determined afterwards
+	mutExRunningProcs.Lock()
+	if processNr < len(runningProcs) && processNr >= 0 {
+		runningProcs[processNr].Restart = false
+		runningProcs[processNr].Handle.Process.Kill()
+		runningProcs[processNr].LogBuffer = append(runningProcs[processNr].LogBuffer, "KILL-Anforderung gesendet")
+		logFile := openLogFile(strings.TrimPrefix(runningProcs[processNr].Name, "[STOP] "))
 		defer logFile.Close()
 		logFile.WriteString("KILL-Anforderung gesendet\n")
-		fmt.Printf(runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " wurde gekillt\n")
+		fmt.Printf(runningProcs[processNr].Name + " mit PID " + strconv.Itoa(runningProcs[processNr].Handle.Process.Pid) + " wurde gekillt\n")
 	}
-	mutExRunningProcs.RUnlock()
+	mutExRunningProcs.Unlock()
 	runtime.Gosched()
 }
 
-func programmExit(progra int) {
+func programmExit(processNr int) {
 	mutExRunningProcs.RLock()
-	if progra < len(runningProcs) && progra >= 0 {
-		//	fmt.Println("schreibe gleich" + runningProcs[progra].ExitCmd)
-		//			runningProcs[progra].StdInPipe.Write([]byte("mspaint.exe\n")) WORKS
-		runningProcs[progra].StdInPipe.Write([]byte(runningProcs[progra].ExitCmd + "\n"))
-		fmt.Printf(runningProcs[progra].Name + " mit PID " + strconv.Itoa(runningProcs[progra].Handle.Process.Pid) + " wurde Exit-Befehl geschickt\n")
+	if processNr < len(runningProcs) && processNr >= 0 {
+		runningProcs[processNr].StdInPipe.Write([]byte(runningProcs[processNr].ExitCmd + "\n"))
+		fmt.Printf(runningProcs[processNr].Name + " mit PID " + strconv.Itoa(runningProcs[processNr].Handle.Process.Pid) + " wurde Exit-Befehl geschickt\n")
 	}
 	mutExRunningProcs.RUnlock()
 	runtime.Gosched()
 }
 
 func helperRoutinesStarter() {
-	var i int = 0 //count helper-runs for firing the lengthCheck
+	var i int = 0 //count helper-runs for firing the lengthCheck when its interval is reached
 	for {
-		err := watchFile() //Veränderungen an der XML erkennen, ggfs. neu einlesen
+		err := watchFile() //check for config file changes
 		if err != nil {
 			panic(err)
-			//			break
 		}
 		fmt.Println("DEBUG: Helper re-run # " + strconv.Itoa(i))
 		fmt.Println("DEBUG: Number of concurrent goroutines running at the moment: " + strconv.Itoa(runtime.NumGoroutine()))
@@ -548,7 +505,7 @@ func helperRoutinesStarter() {
 	}
 }
 
-func updateProcAliveState() {
+func updateProcAliveState() {					//looking for processes that have been exited
 	mutExRunningProcs.Lock()
 	for r := range runningProcs {
 		asd := runningProcs[r].Handle.ProcessState.String()
@@ -565,11 +522,8 @@ func processeAufKonsoleAusgeben() {
 	mutExRunningProcs.Lock()
 	for r := range runningProcs {
 		asd := runningProcs[r].Handle.ProcessState.String()
-		//	asd := procSlice[k].ProcessState.String()
-		//	asd:=procState.String()
 		if strings.HasPrefix(asd, "exit") == false { //exit status 0,1,... don't want any of them!
-			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(r)+", "+runningProcs[r].Name+" "+runningProcs[r].StopCmd+runningProcs[r].ExitCmd)
-			//procSliceNotExited = append(procSliceNotExited, strconv.Itoa(k)+", "+procSliceNameAndStopcmd[k])
+			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(r)+", "+runningProcs[r].Name+" "+runningProcs[r].StopCmd+" "+runningProcs[r].ExitCmd)
 		}
 	}
 	mutExRunningProcs.Unlock()
@@ -633,14 +587,16 @@ const uebersichtTemplate = `
 	</body>
 </html>`
 
-//TODO
-//Fehlerbehandlung
-//Logging mit PID
-//Tests!!!
-//Diagramm
-//SSL
 
+//inspired by golang.org and also to be mentioned:
 /*
+https://jan.newmarch.name/go/template/chapter-template.html
+https://gowalker.org/os/exec
+https://gobyexample.com/reading-files
+https://github.com/bradfitz/runsit
+http://golangtutorials.blogspot.de/2011/06/control-structures-go-switch-case.html
+
+not implemented:
 https://www.socketloop.com/tutorials/golang-securing-password-with-salt
 https://astaxie.gitbooks.io/build-web-application-with-golang/content/en/09.5.html
 */
