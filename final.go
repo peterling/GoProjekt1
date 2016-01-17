@@ -500,7 +500,7 @@ func helperRoutinesStarter() {
 		checkForRestart()
 		time.Sleep(300 * time.Millisecond)
 
-		processeAufKonsoleAusgeben()
+		//		processeAufKonsoleAusgeben()
 		if i > runningProcsLengthInterval {
 			runningProcsLengthCheck()
 			i = 0
@@ -521,20 +521,20 @@ func updateProcAliveState() { //looking for processes that have been exited
 	runtime.Gosched()
 }
 
-func processeAufKonsoleAusgeben() {
-	var procSliceNotExited = make([]string, 0) //copy, so we don't mix up the original list
-	mutExRunningProcs.Lock()
-	for r := range runningProcs {
-		asd := runningProcs[r].Handle.ProcessState.String()
-		if strings.HasPrefix(asd, "exit") == false { //exit status 0,1,... don't want any of them!
-			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(r)+", "+runningProcs[r].Name+" "+runningProcs[r].StopCmd+" "+runningProcs[r].ExitCmd)
-		}
-	}
-	mutExRunningProcs.Unlock()
-	runtime.Gosched()
-	fmt.Print("noch laufende, not-exited processe: ")
-	fmt.Println(procSliceNotExited) //diesen für die website zur anzeige der laufenden prozesse verwenden
-}
+//func processeAufKonsoleAusgeben() {
+//	var procSliceNotExited = make([]string, 0) //copy, so we don't mix up the original list
+//	mutExRunningProcs.Lock()
+//	for r := range runningProcs {
+//		asd := runningProcs[r].Handle.ProcessState.String()
+//		if strings.HasPrefix(asd, "exit") == false { //exit status 0,1,... don't want any of them!
+//			procSliceNotExited = append(procSliceNotExited, strconv.Itoa(r)+", "+runningProcs[r].Name+" "+runningProcs[r].StopCmd+" "+runningProcs[r].ExitCmd)
+//		}
+//	}
+//	mutExRunningProcs.Unlock()
+//	runtime.Gosched()
+//	fmt.Print("noch laufende, not-exited processe: ")
+//	fmt.Println(procSliceNotExited) //diesen für die website zur anzeige der laufenden prozesse verwenden
+//}
 
 //HTML Templates
 const backTemplate = `
