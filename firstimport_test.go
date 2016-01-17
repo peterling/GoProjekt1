@@ -4,11 +4,9 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	//	"fmt"
-	//	"net/http"
-	//	"net/http/httptest"
-	//	"os"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -18,9 +16,6 @@ import (
 
 func TestError(t *testing.T) {
 
-	//	go helperRoutinesStarter()
-	//			if !(runningProcs[0].Handle.Process.Pid <= 65536 && runningProcs[0].Handle.Process.Pid > 0) {
-	//			t.Error("Test failed")
 	//Test Xml Read
 	returnError := xmlReadIn()
 	if returnError != nil {
@@ -81,7 +76,6 @@ func TestError(t *testing.T) {
 	}
 
 	//Test Process Stop
-	//Kein apache vorhanden
 	go programmStart(2, -1) //cmd 1. mal
 	indexProgramm++
 	time.Sleep(2 * time.Second)
@@ -153,55 +147,49 @@ func TestError(t *testing.T) {
 		t.Error("Test: Hash Programm List failed")
 	}
 	time.Sleep(2 * time.Second)
-	//	returnFile := openLogFile("Paint")
-	//	returnFile.Close()
-	//	expectedFile, err := os.OpenFile("./log_Paint.txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	//	expectedFile.Close()
-	//	if (returnFile != expectedFile) && err != nil {
-	//		t.Error("Test: Open Logfile failed")
-	//	}
 
+	// Server tests
+	go webServer()
+	time.Sleep(2 * time.Second)
+	request, _ := http.NewRequest("POST", "/", nil)
+	response := httptest.NewRecorder()
+	ObserverHandler(response, request)
+	responsebody := response.Body
+	stringbody := string(responsebody.Bytes())
 
-	//	handler := new(ObserverHandler)
-	//	recorder := httptest.NewRecorder()
-	//	url := fmt.Sprintf("http://example.com/echo?say=%s", expectedBody)
-	//	req, err := http.NewRequest("GET", url, nil)
-	//	assert.Nil(t, err)
+	boolreturn := strings.Contains(stringbody, expectedBody)
 
-	//	handler.ServeHTTP(recorder, req)
-
-	//	assert.Equal(t, expectedBody, recorder.Body.String())
-
-	//	fmt.Println("Test finished")
-
-	//	const expectedBody = `<!DOCTYPE html>
-	//<html>
-	//	<head>
-	//		<meta charset="UTF-8">
-	//		<title>Observer</title>
-	//	</head>
-	//	<body>
-	//	<input type="button" value="Seite aktualisieren" onClick="window.location.reload()">
-	//	<input type="button" value="XML-Datei anzeigen" onClick="window.location.href='/download'">
-	//	<a href="/download" download="config">XML-Datei herunterladen</a>
-	//	<h1>Programme starten</h1>
-
-	//		<a href="/proccontrol?program=0&aktion=start&hashprog=db7b60263b672e0cdbaea68ce466cf0c3daaf97e">Paint</a><br><a href="/proccontrol?program=1&aktion=start&hashprog=db7b60263b672e0cdbaea68ce466cf0c3daaf97e">Command Prompt</a><br><a href="/proccontrol?program=2&aktion=start&hashprog=db7b60263b672e0cdbaea68ce466cf0c3daaf97e">PING auf GoogleDNS</a><br><a href="/proccontrol?program=3&aktion=start&hashprog=db7b60263b672e0cdbaea68ce466cf0c3daaf97e">Rechner</a><br><a href="/proccontrol?program=4&aktion=start&hashprog=db7b60263b672e0cdbaea68ce466cf0c3daaf97e">Dauerping auf localhost</a><br>
-	//	<h1>Laufende Prozesse hart beenden (SIGKILL)</h1>
-	//		<div><strong>keine überwachten Prozesse</strong></div>
-	//	<h1>Laufende Prozesse weich beenden (SIGTERM)</h1>
-	//		<div><strong>keine überwachten Prozesse</strong></div>
-	//	<h1>Laufende Prozesse mit hinterlegtem Exit-Befehl an STDIN beenden</h1>
-	//		<div><strong>keine überwachten Prozesse</strong></div>
-	//	<h1>Laufende Prozesse mit hinterlegtem STOP-Befehl beenden</h1>
-	//		<div><strong>keine überwachten Prozesse</strong></div>
-	//	<h1>Restart-Option laufender Prozesse (de-)aktivieren</h1>
-	//		<div><strong>keine überwachten Prozesse</strong></div>
-	//	<h1>Restart-Option beendeter Prozesse (de-)aktivieren [revive/dismiss]</h1>
-	//		<div><strong>keine überwachten Prozesse</strong></div>
-	//	<h1>Logging</h1>
-	//		<div><strong>keine Programme hinterlegt</strong></div>
-	//	</body>
-	//</html>`
-
+	if boolreturn != true {
+		t.Error("Server Site failed to load")
+	}
+	request, _ = http.NewRequest("POST", "/proccontrol", nil)
+	response = httptest.NewRecorder()
+	ProcControl(response, request)
+	fmt.Println(response.Code)
+	if response.Code != 200 {
+		t.Fatalf("Non-expected status code %v:\n\tbody: %v", "200", response.Code)
+	}
 }
+
+//	returnFile := openLogFile("Paint")
+//	returnFile.Close()
+//	expectedFile, err := os.OpenFile("./log_Paint.txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+//	expectedFile.Close()
+//	if (returnFile != expectedFile) && err != nil {
+//		t.Error("Test: Open Logfile failed")
+//	}
+
+const expectedBody = `<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>Observer</title>
+	</head>
+	<body>
+	<input type="button" value="Seite aktualisieren" onClick="window.location.reload()">
+	<input type="button" value="XML-Datei anzeigen" onClick="window.location.href='/download'">
+	<a href="/download" download="config">XML-Datei herunterladen</a>
+	<h1>Programme starten</h1>
+`
+
+//}
