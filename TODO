@@ -1,5 +1,5 @@
 Ansatz mit Channels
-container/ring
+container/ring statt slice-logbuffer
 
 #define _GNU_SOURCE
 #include <sys/mman.h>
